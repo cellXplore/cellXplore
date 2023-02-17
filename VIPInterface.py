@@ -1,9 +1,17 @@
+from ast import Index
+from calendar import c
+from importlib.util import source_hash
+from itertools import permutations, product
+from tkinter.tix import TList
+from turtle import st
+from types import CellType
 import requests
 import json
 import traceback
 import sqlite3
-#import server.app.decode_fbs as decode_fbs
+# import server.app.decode_fbs as decode_fbs
 import scanpy as sc
+#import squidpy as sq
 import anndata as ad
 import pandas as pd
 import numpy as np
@@ -15,10 +23,11 @@ import seaborn as sns
 import matplotlib.patches as mpatches
 from matplotlib import rcParams
 import plotly.graph_objects as go
+import plotly
 import plotly.io as plotIO
+import plotly.express as px
 import base64
 import math
-import scipy
 from io import BytesIO
 import sys
 import time
@@ -27,13 +36,13 @@ import re
 import glob
 import subprocess
 import gc #,psutil
-import errno
-from pathlib import Path
+
+#os.environ['R_HOME'] = '/software/R-4.2.1/lib/R'
 
 strExePath = os.path.dirname(os.path.abspath(__file__))
 
 import pprint
-ppr = pprint.PrettyPrinter(depth=6,width=500)
+ppr = pprint.PrettyPrinter(depth=6)
 
 import server.common.compute.diffexp_generic as diffDefault
 import pickle
@@ -51,15 +60,13 @@ def getLock(lock):
     while not lock.acquire():
         time.sleep(1.0)
 def freeLock(lock):
-  lock.release()
+    lock.release()
 
 def route(data,appConfig):
+  #ppr.pprint("current working dir:%s"%os.getcwd())
   data = initialization(data,appConfig)
-  #ppr.pprint(appConfig.server_config.single_dataset__datapath)
-  #ppr.pprint(data)
   try:
     getLock(jobLock)
-    setTimeStamp(data)
     taskRes = distributeTask(data["method"])(data)
     freeLock(jobLock)
     gc.collect()
@@ -68,16 +75,10 @@ def route(data,appConfig):
     return taskRes
   except Exception as e:
     freeLock(jobLock)
-    return 'ERROR @server: '+traceback.format_exc()
+    return 'ERROR @server: '+traceback.format_exc() # 'ERROR @server: {}, {}'.format(type(e),str(e))
+  #return distributeTask(data["method"])(data)
 
 import server.app.app as app
-class getAdapter(object):
-    def __init__(self, adapter):
-        self.adapter = adapter
-    def __enter__(self):
-        return self.adapter
-    def __exit__(self):
-        return
 
 def initialization(data,appConfig):
   # obtain the server host information
@@ -87,28 +88,23 @@ def initialization(data,appConfig):
   data.update(VIPenv)
 
   # updatting the hosting data information
-  # v1.1.1 no multi datasets option
-  # if appConfig.is_multi_dataset():
-  #  data["url_dataroot"]=appConfig.server_config.multi_dataset__dataroot['d']['base_url']
-  #  data['h5ad']=os.path.join(appConfig.server_config.multi_dataset__dataroot['d']['dataroot'], data["dataset"])
-  # else:
-  #  data["url_dataroot"]=None
-  #  data["dataset"]=None
-  #  data['h5ad']=appConfig.server_config.single_dataset__datapath
+  #if appConfig.is_multi_dataset():
+   # data["url_dataroot"]=appConfig.server_config.multi_dataset__dataroot['d']['base_url']
+   # data['h5ad']=os.path.join(appConfig.server_config.multi_dataset__dataroot['d']['dataroot'], data["dataset"])
+  #else:
   data["url_dataroot"]=None
   data["dataset"]=None
   data['h5ad']=appConfig.server_config.single_dataset__datapath
+
   # setting the plotting options
   if 'figOpt' in data.keys():
     setFigureOpt(data['figOpt'])
 
   # get the var (gene) and obv index
-  #ppr.pprint(dir(appConfig.server_config.data_adaptor))
-  #with app.get_data_adaptor() as scD:
-  data['data_adapter'] = appConfig.server_config.data_adaptor
-  scD=appConfig.server_config.data_adaptor
-  data['obs_index'] = scD.get_schema()["annotations"]["obs"]["index"]
-  data['var_index'] = scD.get_schema()["annotations"]["var"]["index"]
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  if True:
+    data['obs_index'] = scD.get_schema()["annotations"]["obs"]["index"]
+    data['var_index'] = scD.get_schema()["annotations"]["var"]["index"]
   return data
 
 def setFigureOpt(opt):
@@ -119,26 +115,24 @@ def getObs(data):
   selC = list(data['cells'].values())
   cNames = ["cell%d" %i for i in selC]
   ## obtain the category annotation
-  #with app.get_data_adaptor(url_dataroot=data['url_dataroot'],dataset=data['dataset']) as scD:
-  scD=data['data_adapter']
-  if scD is not None:
-    selAnno = [data['obs_index']]+data['grp']
-    dAnno = list(scD.get_obs_keys())
-    anno = []
-    sel = list(set(selAnno)&set(dAnno))
-    if len(sel)>0:
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  selAnno = [data['obs_index']]+data['grp']
+  dAnno = list(scD.get_obs_keys())
+  anno = []
+  sel = list(set(selAnno)&set(dAnno))
+  if len(sel)>0:
       tmp = scD.data.obs.loc[selC,sel].astype('str')
       tmp.index = cNames
       anno += [tmp]
-    sel = list(set(selAnno)-set(dAnno))
-    if len(sel)>0:
+  sel = list(set(selAnno)-set(dAnno))
+  if len(sel)>0:
       annotations = scD.dataset_config.user_annotations
       if annotations:
         labels = annotations.read_labels(scD)
         tmp = labels.loc[list(scD.data.obs.loc[selC,data['obs_index']]),sel]
         tmp.index = cNames
         anno += [tmp]
-    obs = pd.concat(anno,axis=1)
+  obs = pd.concat(anno,axis=1)
   #ppr.pprint(obs)
   ## update the annotation Abbreviation
   combUpdate = cleanAbbr(data)
@@ -152,23 +146,19 @@ def getObsNum(data):
   cNames = ["cell%d" %i for i in selC]
   ## obtain the category annotation
   obs = pd.DataFrame()
-  #with app.get_data_adaptor(url_dataroot=data['url_dataroot'],dataset=data['dataset']) as scD:
-  scD=data['data_adapter']
-  if scD is not None:
-    selAnno = data['grpNum']
-    dAnno = list(scD.get_obs_keys())
-    sel = list(set(selAnno)&set(dAnno))
-    if len(sel)>0:
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  selAnno = data['grpNum']
+  dAnno = list(scD.get_obs_keys())
+  sel = list(set(selAnno)&set(dAnno))
+  if len(sel)>0:
       obs = scD.data.obs.loc[selC,sel]
       obs.index = cNames
   return obs
 
 def getVar(data):
   ## obtain the gene annotation
-  #with app.get_data_adaptor(url_dataroot=data['url_dataroot'],dataset=data['dataset']) as scD:
-  scD=data['data_adapter']
-  if scD is not None:
-    gInfo = scD.data.var
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  gInfo = scD.data.var
   gInfo.index = list(gInfo[data['var_index']])
   gInfo = gInfo.drop([data['var_index']],axis=1)
   return gInfo
@@ -202,17 +192,15 @@ def createData(data):
   fSparse = False
   X = []
   if 'genes' in data.keys():
-    #with app.get_data_adaptor(url_dataroot=data['url_dataroot'],dataset=data['dataset']) as scD:
-    scD=data['data_adapter']
-    if scD is not None:
-      if not type(scD.data.X) is np.ndarray:
+    scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+    if not type(scD.data.X) is np.ndarray:
         fSparse = True
-      if len(data['genes'])>0:
+    if len(data['genes'])>0:
         fullG = list(scD.data.var[data['var_index']])
         selG = sorted([fullG.index(i) for i in data['genes']]) #when data loaded backed, incremental is required
         X = scD.data.X[:,selG]
         gNames = [fullG[i] for i in selG] #data['genes']
-      else:
+    else:
         X = scD.data.X
         gNames = list(scD.data.var[data['var_index']])
     if 'figOpt' in data.keys() and data['figOpt']['scale'] == 'Yes':
@@ -233,10 +221,8 @@ def createData(data):
       layout = [layout]
     if len(layout)>0:
       for one in layout:
-        #with app.get_data_adaptor(url_dataroot=data['url_dataroot'],dataset=data['dataset']) as scD:
-        scD=data['data_adapter']
-        if scD is not None:
-          embed['X_%s'%one] = pd.DataFrame(scD.data.obsm['X_%s'%one][selC][:,[0,1]],columns=['%s1'%one,'%s2'%one],index=cNames)
+        scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+        embed['X_%s'%one] = pd.DataFrame(scD.data.obsm['X_%s'%one][selC][:,[0,1]],columns=['%s1'%one,'%s2'%one],index=cNames)
   #ppr.pprint("finished layout ...")
   ## obtain the category annotation
   combUpdate, obs = getObs(data)
@@ -290,7 +276,6 @@ def distributeTask(aTask):
     'SGV':SGV,
     'SGVcompare':SGVcompare,
     'PGV':PGV,
-    'PGVcompare':PGVcompare,
     'VIOdata':VIOdata,
     'HEATplot':pHeatmap,
     'HEATdata':HeatData,
@@ -316,11 +301,16 @@ def distributeTask(aTask):
     'testVIPready':testVIPready,
     'Description':getDesp,
     'GSEAgs':getGSEA,
-    'SPATIAL':SPATIAL,
+	  'SPATIAL':SPATIAL,
     'saveTest':saveTest,
     'getBWinfo':getBWinfo,
-    'GSP':GSP,
-    'plotBW':plotBW
+    'plotBW':plotBW,
+    'CPDBInteractionTable':showCPDBhatTable,
+    'CPDBHeatmap':CPDBHeatmap,
+    'cellChatHeatmap':cellChatHeatmap,
+    'cellChatInteractionTable':showCChatTable,
+    'cellChatDotPlot':cellChatDotPlot,
+    'CPDBDotPlot':CPDBDotPlot
   }.get(aTask,errorTask)
 
 def HELLO(data):
@@ -330,7 +320,7 @@ def iostreamFig(fig):
   #getLock(iosLock)
   figD = BytesIO()
   #ppr.pprint('io located at %d'%int(str(figD).split(" ")[3].replace(">",""),0))
-  fig.savefig(figD,bbox_inches="tight")
+  fig.savefig(figD,bbox_inches='tight')
   #ppr.pprint(sys.getsizeof(figD))
   #ppr.pprint('io located at %d'%int(str(figD).split(" ")[3].replace(">",""),0))
   imgD = base64.encodebytes(figD.getvalue()).decode("utf-8")
@@ -349,73 +339,69 @@ def Msg(msg):
   return iostreamFig(fig)
 
 def SPATIAL(data):
-  #with app.get_data_adaptor(url_dataroot=data['url_dataroot'],dataset=data['dataset']) as scD:
-  scD=data['data_adapter']
-  if scD is not None:
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
     #ppr.pprint(vars(scD.data.uns["spatial"]))
-    spatial=scD.data.uns["spatial"]
-    if (data['embedding'] == "get_spatial_list"):
+  spatial=scD.data.uns["spatial"]
+  if (data['embedding'] == "get_spatial_list"):
       return json.dumps({'list':list(spatial)})
-    library_id=list(spatial)[0]
-    if (data['embedding'] in list(spatial)):
+  library_id=list(spatial)[0]
+  if (data['embedding'] in list(spatial)):
       library_id=data['embedding']
 
-    height, width, depth = spatial[library_id]["images"][data['resolution']].shape
+  height, width, depth = spatial[library_id]["images"][data['resolution']].shape
 
-    embedding = 'X_'+data['embedding']
-    spatialxy = scD.data.obsm[embedding]
-    tissue_scalef = spatial[library_id]['scalefactors']['tissue_' + data['resolution'] + '_scalef']
-    i = data['spots']['spoti_i']
-    x = 0
-    y = 1
+  embedding = 'X_'+data['embedding']
+  spatialxy = scD.data.obsm[embedding]
+  tissue_scalef = spatial[library_id]['scalefactors']['tissue_' + data['resolution'] + '_scalef']
+  i = data['spots']['spoti_i']
+  x = 0
+  y = 1
     # from original embedding to (0,1) coordinate system (cellxgene embedding)
-    scalex = (data['spots']['spot0_x'] - data['spots']['spoti_x']) / (spatialxy[0][x] - spatialxy[i][x])
-    scaley = (data['spots']['spot0_y'] - data['spots']['spoti_y']) / (spatialxy[0][y] - spatialxy[i][y])
+  scalex = (data['spots']['spot0_x'] - data['spots']['spoti_x']) / (spatialxy[0][x] - spatialxy[i][x])
+  scaley = (data['spots']['spot0_y'] - data['spots']['spoti_y']) / (spatialxy[0][y] - spatialxy[i][y])
 
     # image is in (-1,0,1) coordinate system, so multiplied by 2
-    translatex = (spatialxy[i][x]*scalex - data['spots']['spoti_x']) * 2
-    translatey = (spatialxy[i][y]*scaley - data['spots']['spoti_y']) * 2
-    scale = 1/tissue_scalef * scalex * 2
+  translatex = (spatialxy[i][x]*scalex - data['spots']['spoti_x']) * 2
+  translatey = (spatialxy[i][y]*scaley - data['spots']['spoti_y']) * 2
+  scale = 1/tissue_scalef * scalex * 2
     # Addtional translate in Y due to flipping of the image if needed
-    ppr.pprint(scalex)
-    ppr.pprint(scaley)
-    ppr.pprint(translatex)
-    ppr.pprint(translatey)
+  ppr.pprint(scalex)
+  ppr.pprint(scaley)
+  ppr.pprint(translatex)
+  ppr.pprint(translatey)
 
     # from (-1,0,1) (image layer) to (0,1) coordinate system (cellxgene embedding). Overlapping (0,0) origins of both.
-    translatex = -(1+translatex)
-    if (translatey > -0.1):
+  translatex = -(1+translatex)
+  if (translatey > -0.1):
       flip = True
       translatey = -(1+translatey) + height*scale
-    else:
+  else:
       flip = False
       translatey = -(1+translatey)
 
-    returnD = [{'translatex':translatex,'translatey':translatey,'scale':scale}]
+  returnD = [{'translatex':translatex,'translatey':translatey,'scale':scale}]
 
-    dpi=100
-    figsize = width / float(dpi), height / float(dpi)
-    fig = plt.figure(figsize=figsize)
-    ax = fig.add_axes([0, 0, 1, 1])
-    ax.axis('off')
-    if (flip):
+  dpi=100
+  figsize = width / float(dpi), height / float(dpi)
+  fig = plt.figure(figsize=figsize)
+  ax = fig.add_axes([0, 0, 1, 1])
+  ax.axis('off')
+  if (flip):
       ax.imshow(np.flipud(spatial[library_id]["images"][data['resolution']]), interpolation='nearest')
-    else:
+  else:
       ax.imshow(spatial[library_id]["images"][data['resolution']], interpolation='nearest')
 
-    figD = BytesIO()
-    plt.savefig(figD, dpi=dpi)
-    ppr.pprint(sys.getsizeof(figD))
-    imgD = base64.encodebytes(figD.getvalue()).decode("utf-8")
-    figD.close()
-    plt.close(fig)
+  figD = BytesIO()
+  plt.savefig(figD, dpi=dpi)
+  ppr.pprint(sys.getsizeof(figD))
+  imgD = base64.encodebytes(figD.getvalue()).decode("utf-8")
+  figD.close()
+  plt.close(fig)
   return json.dumps([returnD, imgD])
 
 def MINX(data):
-  #with app.get_data_adaptor(url_dataroot=data['url_dataroot'],dataset=data['dataset']) as scD:
-  scD=data['data_adapter']
-  if scD is not None:
-    minV = min(scD.data.X[0])
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  minV = min(scD.data.X[0])
   return '%.1f'%minV
 
 def geneFiltering(adata,cutoff,opt):
@@ -541,31 +527,6 @@ def PGV(data):
                                 var_group_positions=data['grpLoc'],var_group_labels=data['grpID'])
   return iostreamFig(fig)
 
-def PGVcompare(data):
-  adata = createData(data)
-  #adata = geneFiltering(adata,data['cutoff'],1)
-  sc.pp.filter_cells(adata,min_counts=float(data['cutoff']))
-  if len(adata)==0:
-    raise ValueError('No cells in the condition!')
-  strF = ('%s/PGVcompare%f.csv' % (data["CLItmp"],time.time()))
-  X=pd.concat([adata.to_df(),adata.obs[data['grp']]],axis=1,sort=False).to_csv(strF,index_label="cellID")
-
-  # plot in R
-  strCMD = " ".join(["Rscript",strExePath+'/complex_vlnplot_multiple.R',strF,','.join(data['genes']),data['grp'][0],data['grp'][1],str(data['width']),str(data['height']),data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),data['Rlib']])
-  res = subprocess.run(strCMD,shell=True,capture_output=True)
-  img = res.stdout.decode('utf-8')
-  os.remove(strF)
-  if 'Error' in res.stderr.decode('utf-8'):
-    raise SyntaxError("in R: "+res.stderr.decode('utf-8'))
-  return img
-
-def silentRM(strF):
-  try:
-    os.remove(strF)
-  except OSError as e:
-    if e.errno != errno.ENOENT:
-      raise
-
 def pHeatmap(data):
   # figure width is depends on the number of categories was choose to show
   # and the character length of each category term
@@ -577,29 +538,25 @@ def pHeatmap(data):
   #sT = time.time()
 
   adata = createData(data)
-  if len(data['grpNum'])>0:
-    adata.obs = pd.concat([adata.obs,getObsNum(data)],axis=1)
   data['grp'] += data['addGrp']
   #Xdata = pd.concat([adata.to_df(),adata.obs], axis=1, sort=False).to_csv()
   #ppr.pprint('HEAT data reading cost %f seconds' % (time.time()-sT) )
   #sT = time.time()
-
-
+  exprOrder = True
+  if data['order']!="Expression":
+    exprOrder = False;
+    adata = adata[adata.obs.sort_values(data['order']).index,]
+    #s = adata.obs[data['order']]
+    #ix = sorted(range(len(s)), key=lambda k: s[k])
+    #adata = adata[ix,]
   h = 8
   w = len(data['genes'])/3+0.3 + 2
   heatCol=data['color']
   Zscore=None
   heatCenter=None
   colTitle="Expression"
-
+  
   if data['plotMethod']=='sns':
-    exprOrder = True
-    if data['order'][0]!="Expression":
-      exprOrder = False;
-      adata = adata[adata.obs.sort_values(data['order']).index,]
-      #s = adata.obs[data['order']]
-      #ix = sorted(range(len(s)), key=lambda k: s[k])
-      #adata = adata[ix,]
     colCounter = 0
     colName =['Set1','Set3']
     grpCol = list()
@@ -627,7 +584,7 @@ def pHeatmap(data):
       colTitle="Z-score"
     #ppr.pprint('HEAT data preparing cost %f seconds' % (time.time()-sT) )
     #sT = time.time()
-
+  
     try:
       g = sns.clustermap(adata.to_df(),
                        method="ward",row_cluster=exprOrder,z_score=Zscore,cmap=heatCol,center=heatCenter,
@@ -637,8 +594,8 @@ def pHeatmap(data):
                        cbar_kws={"orientation": "horizontal","label": colTitle,"shrink": 0.5})
     except Exception as e:
       return 'ERROR: Z score calculation failed for 0 standard diviation. '+traceback.format_exc() # 'ERROR @server: {}, {}'.format(type(e),str(e))
-
-
+  
+  
     #ppr.pprint('HEAT plotting cost %f seconds' % (time.time()-sT) )
     #sT = time.time()
     g.ax_col_dendrogram.set_visible(False)
@@ -686,33 +643,13 @@ def pHeatmap(data):
       colTitle="Z-score"
     D = pd.concat([D,adata.obs],axis=1,sort=False)
     D.to_csv(strF,index=False)
-
-    if len(data['gAnno'])>0:
-      gAnno = pd.DataFrame(data['gAnno'])
-      gAnno.to_csv(strF.replace("HEAT","HEATgene"),index=False)
-    elif data['gAnnoDef']:
-      gAnno = pd.read_csv("%s/proteinatlas_protein_class.csv"%strExePath,index_col=0,header=0)
-      gNames = {i:i.upper() for i in data['genes']}
-      gAnno = gAnno.loc[list(set(gNames.values()) & set(gAnno.index)),:].iloc[:,1:]
-      for one in [i for i in gNames.values() if i not in gAnno.index]:
-        gAnno.loc[one,:] = np.nan
-      gAnno = gAnno.loc[gNames.values(),:]
-      gAnno.index=gNames.keys()
-      gAnno.fillna("N",inplace=True)
-      gAnno.to_csv(strF.replace("HEAT","HEATgene"))
-      #ppr.pprint(gAnno)
     ## plot in R
-    cmd = "%s/complexHeatmap.R %s %s %s %s %s %s %s %s %s %s %s %s %s %s '%s'"%(strExePath,strF,','.join(data['genes']),colTitle,','.join(data['order']),str(data['width']),str(data['height']),heatCol,
-      str(data['legendRow']),str(data['fontadj']),
-      data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),str(data['swapAxes']),data['figOpt']['vectorFriendly'],data['Rlib'])
-
-    #ppp = pprint.PrettyPrinter(depth=6,width=300)
-    #ppp.pprint(cmd)
-    #return SyntaxError("in R: ")
+    cmd = "%s/complexHeatmap.R %s %s %s %s %f %f %s %s %s %s '%s'"%(strExePath,strF,','.join(data['genes']),colTitle,exprOrder,w,h,heatCol,
+      data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),data['Rlib'])
+    #ppr.pprint(cmd)
     res = subprocess.run(cmd,check=True,shell=True,capture_output=True)#
     img = res.stdout.decode('utf-8')
     os.remove(strF)
-    #silentRM(strF.replace("HEAT","HEATgene"))
     if 'Error' in res.stderr.decode('utf-8'):
       raise SyntaxError("in R: "+res.stderr.decode('utf-8'))
     return img
@@ -812,14 +749,10 @@ def DEG(data):
   if data['DEmethod']=='default':
     if sum(mask[0]==True)<10 or sum(mask[1]==True)<10:
       raise ValueError('Less than 10 cells in a group!')
-    #with app.get_data_adaptor(url_dataroot=data['url_dataroot'],dataset=data['dataset']) as scD:
-    scD=data['data_adapter']
-    if scD is not None:
-      #res = diffDefault.diffexp_ttest(scD,mask[0].to_numpy(),mask[1].to_numpy(),scD.data.shape[1])# shape[cells as rows, genes as columns]
-      res = scD.compute_diffexp_ttest(mask[0].to_numpy(),mask[1].to_numpy(),scD.data.shape[1]-1,0.01)
-      gNames = list(scD.data.var[data['var_index']])
-    deg = pd.DataFrame(res['positive']+res['negative'],columns=['gID','log2fc','pval','qval'])
-    deg = deg.drop_duplicates(ignore_index=True)
+    scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+    res = diffDefault.diffexp_ttest(scD,mask[0].to_numpy(),mask[1].to_numpy(),scD.data.shape[1])# shape[cells as rows, genes as columns]
+    gNames = list(scD.data.var[data['var_index']])
+    deg = pd.DataFrame(res,columns=['gID','log2fc','pval','qval'])
     gName = pd.Series([gNames[i] for i in deg['gID']],name='gene')
     deg = pd.concat([deg,gName],axis=1).loc[:,['gene','log2fc','pval','qval']]
   else:
@@ -847,7 +780,7 @@ def DEG(data):
   strF = ('%s/DEG%f.csv' % (data["CLItmp"],time.time()))
   deg.to_csv(strF,index=False)
   #ppr.pprint([strExePath+'/volcano.R',strF,'"%s"'%';'.join(genes),data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),str(data['logFC']),data['comGrp'][1],data['comGrp'][0]])
-  res = subprocess.run([strExePath+'/volcano.R',strF,';'.join(data['genes']),data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),str(data['logFC']),data['comGrp'][1],data['comGrp'][0],str(data['sigFDR']),str(data['sigFC']),str(data['labelSize']),str(data['dotSize']),str(data['ymin']),str(data['ymax']),data['figOpt']['vectorFriendly'],data['Rlib']],capture_output=True)#
+  res = subprocess.run([strExePath+'/volcano.R',strF,';'.join(genes),data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),str(data['logFC']),data['comGrp'][1],data['comGrp'][0],str(data['sigFDR']),str(data['sigFC']),data['Rlib']],capture_output=True)#
   if 'Error' in res.stderr.decode('utf-8'):
     raise SyntaxError("in volcano.R: "+res.stderr.decode('utf-8'))
   img = res.stdout.decode('utf-8')
@@ -890,91 +823,6 @@ def DEG(data):
   #ppr.pprint(GSEAtable)
   #ppr.pprint(GSEAtable.sort_values('pval'))
   return json.dumps([deg.to_csv(index=False),img,GSEAtable.to_csv(index=False),GSEAimg])#json.dumps([deg.values.tolist(),img])
-
-def specificity_score(adata=None, ctype_col:str=None, ctypes:list=None, ctype_sets:list=None, glist:list=None):
-  if not (adata and ctype_col):
-    raise ValueError('No adata or No ctype_col_name provided!')
-  
-  if not (ctypes and ctype_sets):
-    ctypes = adata.obs[ctype_col].unique().tolist()
-    ctype_dict = {_: set([_]) for _ in ctypes}
-  else:
-    if len(ctypes)!=len(ctype_sets):
-      raise ValueError("Please check your cell type partition!")
-    if len(ctypes)>1:
-      sumset = ctype_sets[0]
-      for nextset in ctype_sets[1:]:
-        if sumset.intersection(nextset):
-          raise ValueError("Self-defined cell type partitions have overlap!!")
-        else:
-          sumset = sumset.union(nextset)    
-    ctype_dict = {ctypes[i]: ctype_sets[i] for i in range(len(ctypes))}
-    
-  if glist and len(glist):
-    adata = adata[:, adata.var_names.isin(set(glist))]
-    if adata.shape[-1]==0:
-      raise ValueError("No gene found! Pls check your gene list!")
-    
-  adata_dict = {ctype:adata[adata.obs[ctype_col].isin(ctype_dict[ctype])] for ctype in ctypes}
-  mean_exp_dict = {ctype: np.squeeze(np.asarray(adata_dict[ctype].X.sum(axis=0))) / adata_dict[ctype].n_obs for ctype in ctypes}
-  df = pd.DataFrame(data=mean_exp_dict, index=adata_dict[ctypes[0]].var_names)
-  df['all'] = df.sum(axis=1)
-  for col in df.columns:
-    df[col] = df[col]/df['all']
-    
-  # assign nan for genes not found
-  # gene in glist order
-  if glist and len(glist): df = df.reindex(glist)   
-  return df
-def restoreX(d):
-  if d.max()<50:
-    d1 = np.exp(d)
-    d2 = np.exp2(d)
-    if abs(d1-d1.round()).sum()<abs(d2-d2.round()).sum():
-      d = d1
-      ppr.pprint("...exp is taken")
-    else:
-      d = d2
-      ppr.pprint("...exp2 is taken")
-    if d.min()>0.1 and (d==d.min()).sum()>100:
-      d = d-d.min()
-      ppr.pprint("...min value %f is taken"%d.min())
-  return(d)
-def GSP(data):
-  data['figOpt']['scale']='No'
-  D = createData(data)
-  if scipy.sparse.issparse(D.X):
-    D.X.data = restoreX(D.X.data)
-  else:
-    D.X = restoreX(D.X)
-  grp = data['grp'][0]
-  X = specificity_score(adata=D,ctype_col=grp)
-  if 'all' in X.columns:
-    Xshow=X.drop('all',axis=1)
-  else:
-    Xshow = X
-  # plot depends on the gene number
-  if X.shape[0]==1:
-    XT = Xshow.T
-    gene = XT.columns[0]
-    XT[grp] = XT.index
-    fig = plt.figure()
-    #ax = XT.plot.bar(x=grp,y=gene)
-    ax = sns.barplot(data=XT,x=grp,y=gene)
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=90)#rotation=45, horizontalalignment='right'
-    img = iostreamFig(fig)
-  elif X.shape[0]<20:
-    fig = plt.figure(figsize=[0.8*Xshow.shape[1],0.5*Xshow.shape[0]+0.1*max([len(x) for x in Xshow.columns])])
-    ax = sns.heatmap(Xshow,annot=True,fmt=".1f",cmap=sns.cubehelix_palette(as_cmap=True))
-    img = iostreamFig(fig)
-  else:
-    g = sns.clustermap(
-      Xshow.sample(min(1000,X.shape[0])),
-      method="ward",col_cluster=False,
-      yticklabels=False,xticklabels=True)
-    img = iostreamFig(g)
-  X.insert(0,"gene",X.index)
-  return json.dumps([X.to_csv(index=False),img])
 
 def DOT(data):
   #ppr.pprint("DOT, starting ...")
@@ -1229,7 +1077,6 @@ def DENS(data):
   #ppr.pprint("plotting plot cost: %f seconds" % plotT)
   #ppr.pprint("plotting total cost: %f seconds" % (time.time()-sT))
   return iostreamFig(fig)
-
 
 def SANK(data):
   updateGene(data)
@@ -1494,10 +1341,6 @@ def getDesp(data):
       txt = "%s<br>%s"%(txt,line)
   return txt
 
-def setTimeStamp(data):
-  strF = re.sub("h5ad$","timestamp",data["h5ad"])
-  Path(strF).touch()
-
 def getPreDEGname(data):
   strF = re.sub("h5ad$","db",data["h5ad"])
   if not os.path.isfile(strF):
@@ -1522,8 +1365,8 @@ def getPreDEGvolcano(data):
   ## plot in R
   strF = ('%s/DEG%f.csv' % (data["CLItmp"],time.time()))
   deg.to_csv(strF,index=False)
-  #ppr.pprint([strExePath+'/volcano.R',strF,';'.join(data['genes']),data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),str(data['logFC']),data['comGrp'][1],data['comGrp'][0],str(data['sigFDR']),str(data['sigFC']),str(data['labelSize']),str(data['dotSize']),str(data['ymin']),str(data['ymax']),data['Rlib']])
-  res = subprocess.run([strExePath+'/volcano.R',strF,';'.join(data['genes']),data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),str(data['logFC']),data['comGrp'][1],data['comGrp'][0],str(data['sigFDR']),str(data['sigFC']),str(data['labelSize']),str(data['dotSize']),str(data['ymin']),str(data['ymax']),data['figOpt']['vectorFriendly'],data['Rlib']],capture_output=True)#
+  #ppr.pprint([strExePath+'/volcano.R',strF,';'.join(genes),data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),str(data['logFC']),data['comGrp'][1],data['comGrp'][0]])
+  res = subprocess.run([strExePath+'/volcano.R',strF,';'.join(data['genes']),data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),str(data['logFC']),data['comGrp'][1],data['comGrp'][0],str(data['sigFDR']),str(data['sigFC']),data['Rlib']],capture_output=True)#
   img = res.stdout.decode('utf-8')
   os.remove(strF)
   if 'Error' in res.stderr.decode('utf-8'):
@@ -1602,12 +1445,10 @@ except Exception as e:
 def mergeMeta(data):
   selC = list(data['cells'].values())
   ## obtain the category annotation
-  #with app.get_data_adaptor(url_dataroot=data['url_dataroot'],dataset=data['dataset']) as scD:
-  scD=data['data_adapter']
-  if scD is not None:
-    if not 'cellN' in scD.data.obs:
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  if not 'cellN' in scD.data.obs:
       raise ValueError('This is not a metacell data!')
-    obs = scD.data.obs.loc[selC,[data['obs_index'],'cellN']]
+  obs = scD.data.obs.loc[selC,[data['obs_index'],'cellN']]
   ppr.pprint(obs)
   ppr.pprint(obs['cellN'].sum())
   if obs['cellN'].sum() > int(data['METAmax']):
@@ -1623,10 +1464,8 @@ def mergeMeta(data):
   return data['METAurl']+"/d/"+os.path.basename(strOut)+"/"
 
 def isMeta(data):
-  #with app.get_data_adaptor(url_dataroot=data['url_dataroot'],dataset=data['dataset']) as scD:
-  scD=data['data_adapter']
-  if scD is not None:
-    if not 'cellN' in scD.data.obs:
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  if not 'cellN' in scD.data.obs:
       return "FALSE"
   strPath = re.sub(".h5ad$","",data["h5ad"])
   if not os.path.exists(strPath):
@@ -1638,7 +1477,7 @@ def getBWinfo(data):
     strD = re.sub(".h5ad$","/",data["h5ad"])
     if os.path.isdir(strD):
         for one in os.listdir(strD):
-            if one.endswith("bw"):#not re.search("bw$",one)==None:
+            if not re.search("bw$",one)==None:
                 BWinfo["BWfile"].append(one)
             elif one=="annotation.rds":
                 BWinfo["BWannotation"]="annotation.rds"
@@ -1647,8 +1486,7 @@ def getBWinfo(data):
             elif one=="links.rds":
                 BWinfo["BWlink"]="links.rds"
             elif one=="bw.cluster":
-                BWinfo["BWcluster"]=pd.read_csv(strD+one,sep="\t",header=0) #"bw.cluster" .to_csv(index=False)
-    BWinfo["BWcluster"]=BWinfo["BWcluster"][BWinfo["BWcluster"]['Wig'].isin(BWinfo["BWfile"])].to_csv(index=False)
+                BWinfo["BWcluster"]="bw.cluster"
     return json.dumps(BWinfo)
 
 def plotBW(data):
@@ -1656,34 +1494,385 @@ def plotBW(data):
     strCSV = ('%s/BW%f.csv' % (data["CLItmp"],time.time()))
     ## select all cells
     strType = strD + 'bw.cluster'
+    data['bw']=['%s.bw'%one for one in data['bw']]
+    grpFlag = False
     if os.path.isfile(strType) and len(data['genes'])>0:
-        clusterInfo = pd.read_csv(strType,sep="\t",header=0,index_col=0)
-        clusterInfo = clusterInfo.loc[data['bw'],:]
-        grp = []
-        scD=data['data_adapter']
-        if scD is not None:
-          dAnno = list(scD.get_obs_keys())
-          grp = [i for i in clusterInfo.columns if i in dAnno]
-        if len(grp)>0:
-            data['grp'] = grp
+        with open(strType,"r") as f:
+            grp = f.readline().strip()
+        scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+        dAnno = list(scD.get_obs_keys())
+        if grp in dAnno:
+              grpFlag = True
+        if grpFlag:
+            data['grp'] = [grp]
             adata = createData(data)
-            if len(adata)>0:
-                selC=adata.obs[grp[0]].isin(list(clusterInfo[grp[0]]))
-                for oneG in grp:
-                    selC = selC | adata.obs[oneG].isin(list(clusterInfo[oneG]))
-                adata = adata[selC,:]
-                pd.concat([adata.obs,adata.to_df()], axis=1, sort=False).to_csv(strCSV)
+            if len(adata)==0:
+                grpFlag = False
+            else:
+                cluster = pd.read_csv(strType,sep="\t",header=None,index_col=1,skiprows=1)#delimiter="\n",
+                cluster = cluster[cluster[0].isin(data['bw'])]
+                adata = adata[adata.obs[grp].isin(list(cluster.index)),:]
+                obsCluster = pd.DataFrame(list(cluster.loc[adata.obs[grp],:][0]),index=adata.obs.index,columns=[grp])
+                pd.concat([obsCluster,adata.to_df()], axis=1, sort=False).to_csv(strCSV)
     ## plot in R
-    #strCMD = ' '.join([strExePath+'/browserPlot.R',strD,data['region'],','.join(data['bw']),str(data['exUP']),str(data['exDN']),strCSV,str(data['cutoff']),data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),data['Rlib']])
+    #strCMD = ' '.join([strExePath+'/browserPlot.R',strD,data['region'],str(data['exUP']),str(data['exDN']),strCSV,str(data['cutoff']),data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),data['Rlib']])
     #ppr.pprint(strCMD)
     res = subprocess.run([strExePath+'/browserPlot.R',strD,data['region'],','.join(data['bw']),str(data['exUP']),str(data['exDN']),strCSV,str(data['cutoff']),data['figOpt']['img'],str(data['figOpt']['fontsize']),str(data['figOpt']['dpi']),data['Rlib']],capture_output=True)#
     img = res.stdout.decode('utf-8')
-    if len(adata)>0:
+    if grpFlag:
         os.remove(strCSV)
     if 'Error' in res.stderr.decode('utf-8'):
         raise SyntaxError("in R: "+res.stderr.decode('utf-8'))
 
     return img
+
+
+def cellChatHeatmap(data):
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  if True:
+    Cluster_R = data['Cluster_Receiver']
+    Cluster_S = data['Cluster_Source']
+    
+    Condition = data['Condition']
+    #measure = 'count'
+    #Tissue = 'Lung'
+    colour = data['colour']
+    interactions = scD.data.uns['Cellchat_Interactions']
+    freq1 = pd.crosstab(index=interactions['source'], columns=interactions['target'])
+
+    interactions = interactions[interactions["Condition"] == Condition]
+    freq2 = pd.crosstab(index=interactions['source'], columns=interactions['target'])
+    
+    freq1_column = freq1.columns
+    freq2_column = freq2.columns
+
+    freq_column_common = freq1_column.difference(freq2_column)
+
+    for i in freq_column_common:
+      freq2.insert(len(freq2.columns), i, 0)
+
+    heatmap_df = freq2.loc[Cluster_S, Cluster_R]
+
+    val = {'z': heatmap_df.values.tolist(),
+    'x': heatmap_df.columns.tolist(),
+    'y': heatmap_df.index.tolist()}
+
+    fig = go.Figure(data=go.Heatmap(val,
+                                colorscale=colour,
+                                ))
+
+    div = plotIO.to_html(fig)
+
+    return div
+
+def showCPDBhatTable(data):
+   scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+   if True:
+    cci_table = scD.data.uns['CellPhoneDB_Interactions']
+    condition = data['Condition']
+    cci_table_subset = cci_table[cci_table['Condition'] == condition]
+    cci_table_subset = cci_table_subset.to_csv(index=False)
+    cci_table_json = json.dumps(cci_table_subset)
+
+   return cci_table_json
+
+def showCChatTable(data):
+   scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+   if True:
+    cci_table = scD.data.uns['Cellchat_Interactions']
+    condition = data['Condition']
+    cci_table_subset = cci_table[cci_table['Condition'] == condition]
+    cci_table_subset = cci_table_subset.to_csv(index=False)
+    cci_table_json = json.dumps(cci_table_subset)
+
+   return cci_table_json
+
+def cellChatDotPlot(data):
+
+   scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+   if True:
+    
+    cci_table = scD.data.uns['Cellchat_Interactions']
+    cellPval = float(data['cellChatPval'])
+    Cluster_R = data['Cluster_Receiver']
+    Cluster_S = data['Cluster_Source']
+    Condition = data['Condition']
+    colour = data['colour']
+
+    cellpair = []
+
+    for i in product(Cluster_S, Cluster_R):
+      comb = i[0] + '-' + i[1]
+      cellpair.append(comb)
+
+    ppr.pprint(cellpair)
+    ppr.pprint(cci_table['Interacting_Pair'])
+    small = cci_table[cci_table['Interacting_Pair'].isin(cellpair)]
+    ppr.pprint(small)
+    small = small[small["Condition"] == Condition]
+    ppr.pprint(small)
+    small = small[small['pval'] < cellPval]
+
+    conditions = [
+       (small['pval'] > 0.05),
+       (small['pval'] > 0.01) & (small['pval'] <= 0.05),
+       (small['pval'] <= 0.01)]
+
+    choices = [1,2,3]
+
+    small['Pseudop'] = np.select(conditions, choices, default = 'NA')
+    small['Pseudop'] = small['Pseudop'].astype(float)
+
+
+    hover_text = []
+    bubble_size = []
+
+    for index, row in small.iterrows():
+         hover_text.append(('Interacting Pair: {Interacting_Pair}<br>' +
+                         'Interacting LR: {Interacting_LR}<br>' +
+                         'P-value: {pvalues}<br>' +
+                         'Communication Probability: {probability}').format(Interacting_Pair = row['Interacting_Pair'],
+                                                       Interacting_LR = row['interaction_name_2'],
+                                                       pvalues = row['pval'],
+                                                       probability = row['prob']))
+         bubble_size.append(row['Pseudop'])
+    
+    small['text'] = hover_text
+    small['size'] = bubble_size
+    bubble_size = np.array(bubble_size)
+
+    sizeref = bubble_size.max()/10 ** 2
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+       x=small['Interacting_Pair'], y=small['interaction_name_2'],
+       text = small['text'],
+       marker_size = bubble_size,))
+
+    fig.update_traces(mode = 'markers', marker=dict(sizemode='area',
+                                               sizeref = sizeref, 
+                                               color=small['prob'],
+                                               colorscale=colour,
+                                                sizemin = 1, showscale=True,
+                                               
+     colorbar_title = 'Communication Probability'))
+    fig.update_xaxes(tickangle=45)
+
+    fig.update_layout(
+       title = 'Cell-Cell Interactions', title_x = 0.5,
+       xaxis = dict(
+       title = 'Interacting Cell Types',),
+       yaxis = dict(
+       title = 'Ligand-Receptor Pairs'),
+       height = 800)
+
+    div = plotIO.to_html(fig)
+    return div
+
+def CPDBDotPlot(data):
+
+   scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+   if True:
+    
+    cci_table = scD.data.uns['CellPhoneDB_Interactions']
+    cellPval = float(data['CPDBPval'])
+    Cluster_R = data['Cluster_Receiver']
+    Cluster_S = data['Cluster_Source']
+    Condition = data['Condition']
+    colour = data['colour']
+
+    cellpair = []
+
+    for i in product(Cluster_S, Cluster_R):
+      comb = i[0] + '-' + i[1]
+      cellpair.append(comb)
+
+    small = cci_table[cci_table['Interacting_Pair'].isin(cellpair)]
+    small = small[small["Condition"] == Condition]
+    ppr.pprint(small)
+    for col in small.columns:
+      ppr.pprint(col)
+
+    small = small[small['pval'] < cellPval]
+    #ppr.pprint(small)
+    conditions = [
+       (small['pval'] > 0.05),
+       (small['pval'] > 0.01) & (small['pval'] <= 0.05),
+       (small['pval'] <= 0.01)]
+    #ppr.pprint(conditions)
+    choices = [1,2,3]
+
+    small['Pseudop'] = np.select(conditions, choices, default = 'NA')
+    small['Pseudop'] = small['Pseudop'].astype(float)
+   # ppr.pprint(small)
+
+    hover_text = []
+    bubble_size = []
+
+    for index, row in small.iterrows():
+         hover_text.append(('Interacting Pair: {Interacting_Pair}<br>' +
+                         'Interacting LR: {Interacting_LR}<br>' +
+                         'P-value: {pvalues}<br>' +
+                         'Mean Expression: {mean}').format(Interacting_Pair = row['Interacting_Pair'],
+                                                       Interacting_LR = row['Interacting_LR'],
+                                                       pvalues = row['pval'],
+                                                       mean = row['mean']))
+         bubble_size.append(row['Pseudop'])
+    ppr.pprint(bubble_size)
+    small['text'] = hover_text
+    small['size'] = bubble_size
+    bubble_size = np.array(bubble_size)
+    ppr.pprint(bubble_size)
+    sizeref = bubble_size.max()/10 ** 2
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+       x=small['Interacting_Pair'], y=small['Interacting_LR'],
+       text = small['text'],
+       marker_size = bubble_size,))
+
+    fig.update_traces(mode = 'markers', marker=dict(sizemode='area',
+                                               sizeref = sizeref, 
+                                               color=small['mean'],
+                                               colorscale=colour,
+                                                sizemin = 1, showscale=True,
+                                               
+     colorbar_title = 'Mean Expression'))
+    fig.update_xaxes(tickangle=45)
+
+    fig.update_layout(
+       title = 'Cell-Cell Interactions', title_x = 0.5,
+       xaxis = dict(
+       title = 'Interacting Cell Types',),
+       yaxis = dict(
+       title = 'Ligand-Receptor Pairs'),
+       height = 800)
+
+    div = plotIO.to_html(fig)
+    return div
+    
+
+def CPDBHeatmap(data):
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  if True:
+    Cluster_R = data['Cluster_Receiver']
+    Cluster_S = data['Cluster_Source']
+    #ppr.pprint("The cluster reciever is: " + Cluster_R)
+    #ppr.pprint("The cluster sender is: " + Cluster_S)
+    Condition = data['Condition']
+    #measure = 'count'
+    #Tissue = 'Lung'
+    colour = data['colour']
+    interactions = scD.data.uns['CellPhoneDB_Interactions']
+    freq1 = pd.crosstab(index=interactions['source'], columns=interactions['target'])
+
+    interactions = interactions[interactions["Condition"] == Condition]
+    freq2 = pd.crosstab(index=interactions['cluster_1'], columns=interactions['cluster_2'])
+    
+    freq1_column = freq1.columns
+    freq2_column = freq2.columns
+
+    freq_column_common = freq1_column.difference(freq2_column)
+
+    for i in freq_column_common:
+      freq2.insert(len(freq2.columns), i, 0)
+
+    heatmap_df = freq2.loc[Cluster_S, Cluster_R]
+
+    ppr.pprint(heatmap_df)
+
+    val = {'z': heatmap_df.values.tolist(),
+    'x': heatmap_df.columns.tolist(),
+    'y': heatmap_df.index.tolist()}
+
+    fig = go.Figure(data=go.Heatmap(val,
+                                colorscale=colour,
+                                ))
+                                
+    fig.update_layout(
+       title = 'Number of Cell-Cell Interactions', title_x = 0.5,
+       xaxis = dict(
+       title = 'Interacting Cell Types',),
+       yaxis = dict(
+       title = 'Ligand-Receptor Pairs'),
+       height = 800)
+
+    div = plotIO.to_html(fig)
+
+    return div
+
+
+def cellIntDifferentialHeatmap(data):
+
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  if True:
+
+    cci_table = scD.data.uns['CellPhoneDB_Interactions']
+    cellPval = float(data['cellPval'])
+    Cluster_R = data['Cluster_Receiver']
+    Cluster_S = data['Cluster_Source']
+    Condition_A = data['CondA']
+    Condition_B = data['CondB']
+    celltypes = data['Cluster_Key']
+    heatCol=data['color']
+
+    disease = cci_table[cci_table["Condition"] == Condition_A]
+    healthy = cci_table[cci_table["Condition"] == Condition_B]
+    
+    disease_freq = pd.crosstab(index=disease['cluster_1'], columns=disease['cluster_2'])
+    healthy_freq = pd.crosstab(index=healthy['cluster_1'], columns=healthy['cluster_2'])
+
+    disease_freq_rows = disease_freq.index.tolist()
+    healthy_freq_rows = healthy_freq.index.tolist()
+    
+    not_in_test_rows_h = list(set(celltypes) - set(healthy_freq_rows))
+
+    not_in_test_rows_d = list(set(celltypes) - set(disease_freq_rows))
+
+    for i in not_in_test_rows_d:
+        disease_freq = disease_freq.append(pd.Series(0, index=disease_freq.columns), ignore_index=True)
+
+    for i in not_in_test_rows_h:
+        healthy_freq = healthy_freq.append(pd.Series(0, index=healthy_freq.columns), ignore_index=True)
+
+    disease_freq_column = disease_freq.columns.tolist()
+    healthy_freq_column = healthy_freq.columns.tolist()
+
+    not_in_test_columns_h = list(set(celltypes) - set(healthy_freq_column))
+
+    for i in not_in_test_columns_h:
+        healthy_freq.insert(len(healthy_freq.columns), i, 0)
+
+    not_in_test_columns_d = list(set(celltypes) - set(disease_freq_column))
+
+    for i in train_not_in_test_columns_d:
+       disease_freq.insert(len(disease_freq.columns), i, 0)
+
+
+    healthy_freq.index = celltypes
+    disease_freq.index = celltypes
+    healthy_freq_1 = healthy_freq.loc[source, target]
+    disease_freq_1 = disease_freq.loc[source, target]
+    diff_freq = disease_freq_1.subtract(healthy_freq_1)
+
+    def df_to_plotly(df):
+        return {'z': df.values.tolist(),
+                'x': df.columns.tolist(),
+                'y': df.index.tolist()}
+
+    fig = go.Figure(data=go.Heatmap(df_to_plotly(diff_freq),
+                                    colorscale=plotly.colors.sequential.heatCol, zmid=0))
+
+    fig.update_layout(
+        title="Difference in Number of Interactions",
+        xaxis_title="Reciever Cells",
+        yaxis_title="Sender Cells")
+
+    div = plotIO.to_html(fig)
+    
+    return fig
 
 #make sure the h5ad file full name is listed in vip.env as a variable 'testVIP';
 def testVIPready(data):

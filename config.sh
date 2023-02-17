@@ -36,9 +36,10 @@ git clone https://github.com/chanzuckerberg/cellxgene.git
 cd cellxgene
 #git checkout bedbc87ed6178cd00a586feac3e99d4912d1c74e # v 0.16.7  # 735eb11eb78b5e6c35ba84438970d0ce369604e1 (v0.15.0)
 #git checkout bdfd9fe0a5462a0c139675fe10356765d2bbd95b # v 0.16.8
-git checkout f48d06fb9043771d7370ee9ac0dc9de8ae6ad888 # v1.1.1
 #sed -i 's|anndata>=0.7.0|anndata>=0.7.4|' 'server/requirements.txt'
 #sed -i 's|scanpy==1.4.6|scanpy==1.6.1|' 'server/requirements.txt'
+#git checkout 853976b716433a5dab20cfcb16a5904c54b8a639 # v 1.0.0
+git checkout f48d06fb9043771d7370ee9ac0dc9de8ae6ad888 # v1.1.1
 cd ..
 
 ## update the client-side source code of cellxgene for VIP
@@ -50,7 +51,7 @@ sed -i "s|<div id=\"root\"></div>|$(sed -e 's/[&\\/]/\\&/g; s/|/\\|/g; s/$/\\/;'
 sed -i "s|logoRelatedPadding = 50|logoRelatedPadding = 60|" "cellxgene/client/src/components/leftSidebar/index.js"
 
 ## update the cellxgene title to cellxgene VIP
-sed -i "s|title=\"cellxgene\"|title=\"cellxgene VIP\"|" "cellxgene/client/src/components/app.js"
+sed -i "s|title=\"cellXplore\"|title=\"cellXplore\"|" "cellxgene/client/src/components/app.js"
 
 ## modify zoom/pan default
 sed -i "s|const *scaleMax *= *[0-9\.]\+|const scaleMax = 50000|; s|const *scaleMin *= *[0-9\.]\+|const scaleMin = 0.1|; s|const *panBound *= *[0-9\.]\+|const panBound = 80|" "cellxgene/client/src/util/camera.js"
