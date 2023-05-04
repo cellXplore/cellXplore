@@ -19,13 +19,17 @@ import diffxpy.api as de
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
+from matplotlib import cm, colors
 import seaborn as sns
 import matplotlib.patches as mpatches
 from matplotlib import rcParams
+from matplotlib.widgets import LassoSelector
+from matplotlib.path import Path
 import plotly.graph_objects as go
 import plotly
 import plotly.io as plotIO
 import plotly.express as px
+from ipywidgets import interactive, VBox
 import base64
 import math
 from io import BytesIO
@@ -77,6 +81,60 @@ def route(data,appConfig):
     freeLock(jobLock)
     return 'ERROR @server: '+traceback.format_exc() # 'ERROR @server: {}, {}'.format(type(e),str(e))
   #return distributeTask(data["method"])(data)
+class SelectFromCollection:
+    """
+    Select indices from a matplotlib collection using `LassoSelector`.
+
+    Selected indices are saved in the `ind` attribute. This tool fades out the
+    points that are not part of the selection (i.e., reduces their alpha
+    values). If your collection has alpha < 1, this tool will permanently
+    alter the alpha values.
+
+    Note that this tool selects collection objects based on their *origins*
+    (i.e., `offsets`).
+
+    Parameters
+    ----------
+    ax : `~matplotlib.axes.Axes`
+        Axes to interact with.
+    collection : `matplotlib.collections.Collection` subclass
+        Collection you want to select from.
+    alpha_other : 0 <= float <= 1
+        To highlight a selection, this tool sets all selected points to an
+        alpha value of 1 and non-selected points to *alpha_other*.
+    """
+
+    def __init__(self, ax, collection, alpha_other=0.3):
+        self.canvas = ax.figure.canvas
+        self.collection = collection
+        self.alpha_other = alpha_other
+
+        self.xys = collection.get_offsets()
+        self.Npts = len(self.xys)
+
+        # Ensure that we have separate colors for each object
+        self.fc = collection.get_facecolors()
+        if len(self.fc) == 0:
+            raise ValueError('Collection must have a facecolor')
+        elif len(self.fc) == 1:
+            self.fc = np.tile(self.fc, (self.Npts, 1))
+
+        self.lasso = LassoSelector(ax, onselect=self.onselect)
+        self.ind = []
+
+    def onselect(self, verts):
+        path = Path(verts)
+        self.ind = np.nonzero(path.contains_points(self.xys))[0]
+        self.fc[:, -1] = self.alpha_other
+        self.fc[self.ind, -1] = 1
+        self.collection.set_facecolors(self.fc)
+        self.canvas.draw_idle()
+
+    def disconnect(self):
+        self.lasso.disconnect_events()
+        self.fc[:, -1] = 1
+        self.collection.set_facecolors(self.fc)
+        self.canvas.draw_idle()
 
 import server.app.app as app
 
@@ -310,7 +368,9 @@ def distributeTask(aTask):
     'cellChatHeatmap':cellChatHeatmap,
     'cellChatInteractionTable':showCChatTable,
     'cellChatDotPlot':cellChatDotPlot,
-    'CPDBDotPlot':CPDBDotPlot
+    'CPDBDotPlot':CPDBDotPlot,
+    'spatialLassoSelection':spatialLassoSelection,
+    'singleCellLassoSelection':singleCellLassoSelection
   }.get(aTask,errorTask)
 
 def HELLO(data):
@@ -1801,6 +1861,147 @@ def CPDBHeatmap(data):
 
     div = plotIO.to_html(fig)
 
+    return div
+  
+# def spatialLassoSelection(data):
+#   scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+#   if True:
+#     spatial_table = scD.data.uns['spatial_coordinates']
+
+#   f = go.FigureWidget([go.Scatter(x = spatial_table['sdimx'], y = spatial_table['sdimy'], mode = 'markers')]) 
+#   scatter = f.data[0]
+
+#   # def update_axes(xasis, yaxis):
+#   #   scatter = f.data[0]
+#   #   scatter.x = spatial_table[xaxis]
+#   #   scatter.y = spatial_table[yaxis]
+#   #   with f.batch_update():
+#   #     f.layout.xaxis.title = xaxis
+#   #     f.layout.yaxis.title = yaxis
+  
+#   t = go.FigureWidget([go.Table(
+#     header = dict(values = ['cell_ID', 'sdimx', 'sdimy'],
+#                   fill = dict(color = '#C2D4FF'),
+#                   align = ['left'] * 5),
+#     cells = dict(values = [spatial_table[col] for col in ['cell_ID', 'sdimx', 'sdimy']],
+#                  fill = dict(color='#F5F8FF'),
+#                  align = ['left'] * 5)
+#   )])
+
+#   def selection_fn(trace,points,selector):
+#     t.data[0].cells.values = [spatial_table.loc[points.point_inds][col] for col in ['cell_ID', 'sdimx', 'sdimy']]
+
+#   scatter.on_selection(selection_fn)
+
+#   fig = f
+
+#   div = plotIO.to_html(fig)
+#   # table = json.dumps(t, cls = plotly.utils.PlotlyJSONEncoder) 
+  
+#   # res_list = []
+#   # res_list.append(div)
+#   # res_list.append(table)
+
+#   return div
+ 
+def spatialLassoSelection(data):
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  if True:
+    color_palette = list(map(colors.to_hex, cm.tab20.colors))
+    color = scD.data.uns['spatial']['A1_naive']["metadata"]['brain_regions'].astype('category')
+    spatial_table = scD.data.uns['spatial']['A1_naive']["coordinates"]
+    fig = px.scatter(spatial_table, x = 'sdimx', y = 'sdimy', 
+                     color=color, color_discrete_sequence=color_palette,
+                     labels={'sdimx': " ",
+                             'sdimy': " "
+                     })
+    fig.update_layout(
+      legend=dict(
+      orientation='v',
+      y=0,
+      x=0,
+      xanchor='auto',
+      yanchor='top'
+      ),
+      legend_title_text='Spatial Annotation',
+      dragmode = 'drawopenpath',
+      newshape_line_color='red',
+      autosize = True
+    )
+    div = plotIO.to_html(fig)
+    
+    return div
+
+
+def singleCellLassoSelection(data):
+  scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+  if not 'selection' in data:
+    if True:
+      color_palette = list(map(colors.to_hex, cm.tab20.colors))
+      color = scD.data.obs['Cell_Subclusters'].astype('category')
+      umap_table = pd.DataFrame(scD.data.obsm['X_umap'], columns = ['xdim','ydim'])
+      fig = px.scatter(umap_table, x = 'xdim', y = 'ydim', 
+                       color=color, color_discrete_sequence=color_palette,
+                       labels={'xdim': " ",
+                             'ydim': " "
+                     })
+      fig.update_layout(showlegend=False,
+        dragmode = 'drawopenpath',
+        newshape_line_color='red',
+        autosize = True,
+      )
+      div = plotIO.to_html(fig)
+      
+      return div
+  else:
+    points = data['selection']
+    #deconvolution_table = scD.data.uns['spatial']['A1_naive']["deconvolution"]
+    #subset_selected_spots = deconvolution_table.loc[[points]]
+    # ppr.pprint("hello")
+    # ppr.pprint(points)
+    # ppr.pprint(type(points))
+    points_df = pd.DataFrame.from_dict(points)
+    points_df = points_df.round()
+    points_df = points_df.astype('int32')
+    points_df = points_df.rename(columns={0:'sdimx', 1:'sdimy'})
+    # ppr.pprint(points_df)
+
+    # deconvolution_table = scD.data.uns['spatial']['A1_naive']["deconvolution"]
+    coordinate_table = scD.data.uns['spatial']['A1_naive']["coordinates"]
+    spots_of_interest = pd.merge(coordinate_table,points_df.drop_duplicates())
+    # ppr.pprint(spots_of_interest)
+
+    deconvolution_table = scD.data.uns['spatial']['A1_naive']["deconvolution"]
+    decon_of_interest = pd.merge(deconvolution_table,spots_of_interest.drop_duplicates())
+    decon_of_interest = decon_of_interest.drop(columns=['cell_ID', 'sdimx', 'sdimy'])
+    ppr.pprint(decon_of_interest)
+
+    # celltypes = decon_of_interest.gt(0.1).dot(decon_of_interest.columns + ','.str[:-1])
+    # celltypes = decon_of_interest.apply(lambda row: row[row > 0.2].index, axis=1)
+    # ppr.pprint(celltypes)
+    ppr.pprint("hello")
+    celltypes = decon_of_interest.idxmax(axis=1)
+    
+    # celltypes = decon_of_interest[decon_of_interest.columns[decon_of_interest.max() > 0.01]]
+
+    ppr.pprint(len(celltypes.index))
+    
+    ppr.pprint(celltypes)
+
+    color_palette = list(map(colors.to_hex, cm.tab20.colors))
+    color = scD.data.obs['Cell_Subclusters'].astype('category')
+    umap_table = pd.DataFrame(scD.data.obsm['X_umap'], columns = ['xdim','ydim'])
+    fig = px.scatter(umap_table, x = 'xdim', y = 'ydim', 
+                     color=color, color_discrete_sequence=color_palette,
+                     labels={'xdim': " ",
+                             'ydim': " "
+                     })
+    fig.update_layout(showlegend=False,
+    dragmode = 'drawopenpath',
+    newshape_line_color='red'
+    )
+    div = plotIO.to_html(fig)
+      
     return div
 
 
