@@ -1979,18 +1979,18 @@ def singleCellLassoSelection(data):
     # celltypes = decon_of_interest.gt(0.1).dot(decon_of_interest.columns + ','.str[:-1])
     # celltypes = decon_of_interest.apply(lambda row: row[row > 0.2].index, axis=1)
     # ppr.pprint(celltypes)
-    ppr.pprint("hello")
     celltypes = decon_of_interest.idxmax(axis=1)
     
     # celltypes = decon_of_interest[decon_of_interest.columns[decon_of_interest.max() > 0.01]]
-
-    ppr.pprint(len(celltypes.index))
-    
-    ppr.pprint(celltypes)
+    selected_cell_types = set(celltypes.tolist())
 
     color_palette = list(map(colors.to_hex, cm.tab20.colors))
-    color = scD.data.obs['Cell_Subclusters'].astype('category')
-    umap_table = pd.DataFrame(scD.data.obsm['X_umap'], columns = ['xdim','ydim'])
+
+    subsampled_adata = scD.data[scD.data.obs['Cell_Subclusters'].isin(selected_cell_types)]
+
+    color = subsampled_adata.obs['Cell_Subclusters'].astype('category')
+    umap_table = pd.DataFrame(subsampled_adata.obsm['X_umap'], columns = ['xdim','ydim'])
+
     fig = px.scatter(umap_table, x = 'xdim', y = 'ydim', 
                      color=color, color_discrete_sequence=color_palette,
                      labels={'xdim': " ",

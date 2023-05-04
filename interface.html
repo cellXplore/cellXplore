@@ -5915,8 +5915,8 @@ if(grpMetaS && grpMetaR && CCI_ConK && CCI_Con && colour) {
     $('#CPDBHeatmapFig').html(res);
 
   },
-  error: function() {
-    console.log('error');
+  error: function(err) {
+    console.log('error: ', err.responseText);
     $("#CCInote2").text('Plotting Error!');
   }
 })
@@ -5954,19 +5954,18 @@ function updateUMAP(dataset){
     url: VIPurl,
     data: stringify(D),
     contentType: 'application/json;charset=UTF-8',
-    dataType: 'json',
+    dataType: 'html',
     success: function(res){
-      $('.singleCellPlotfig').html(res);
+      console.log("updating plot", res);
+      $('#singleCellPlotfig').html(res);
     },
-    error:function(){
-      console.log('error');
+    error:function(request,status,error){
+    console.log('error: ', request,status,error);
       $("#CCInote2").text('Plotting Error!');
     }
   })
   return
 
-  $("#CCInote").text('Input data required');
-  document.getElementById("singleCellPlotfig").innerHTML = "";
 }
 
 function spatialLassoSelection(){
@@ -5984,7 +5983,7 @@ function spatialLassoSelection(){
   contentType: 'application/json;charset=UTF-8',//
   success: function(res){
     $(".spatialLassoPlotbt").prop("disabled",false);
-    console.log('Working')
+    console.log('spatialLassoSelection')
     $('#spatialPlotfig').html(res);
     console.log(res);
 
@@ -6000,8 +5999,8 @@ function spatialLassoSelection(){
   });
 
   },
-  error: function() {
-    console.log('error');
+  error: function(request,status,error) {
+    console.log('error', request,status,error);
     $("#CCInote2").text('Plotting Error!');
   }
 })
@@ -6027,7 +6026,7 @@ function singleCellLassoSelection(){
   contentType: 'application/json;charset=UTF-8',//
   success: function(res){
     $(".singleCellLassoPlotbt").prop("disabled",false);
-    console.log('Working')
+    console.log('singleCellLassoSelection')
     //$('#spatialPlotfig').html(res);
     $('#singleCellPlotfig').html(res);
     console.log(res);
@@ -6043,8 +6042,8 @@ function singleCellLassoSelection(){
   });
 
   },
-  error: function() {
-    console.log('error');
+  error: function(request,status,error) {
+    console.log('error',request,status,error);
     $("#CCInote2").text('Plotting Error!');
   }
 })
