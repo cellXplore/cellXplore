@@ -1643,9 +1643,11 @@ def showCChatTable(data):
     cci_table_subset = cci_table[cci_table['Condition'] == condition]
 
     if data["selection"] != None:
+        # ppr.pprint(data)
         cell_types = _get_cell_types_from_points(scD.data, data["selection"])
-        cci_table_subset = cci_table_subset[cci_table['Target Cluster'].isin(cell_types)]
-        cci_table_subset = cci_table_subset[cci_table['Sender Cluster'].isin(cell_types)]
+        ppr.pprint(cci_table)
+        cci_table_subset = cci_table_subset[cci_table['target'].isin(cell_types)]
+        cci_table_subset = cci_table_subset[cci_table['source'].isin(cell_types)]
 
     #subset again only the tables
     cci_table_subset = cci_table_subset.to_csv(index=False)
