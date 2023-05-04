@@ -21,7 +21,7 @@ cd cellXplore
 
 source <path to Anaconda3>/etc/profile.d/conda.sh (Default: /opt/anaconda3/etc/profile.d/conda.sh)
 conda config --set channel_priority flexible
-conda env create -n cellXplore -f cellXplore.yml (local R under conda, no root privilege needed)
+mamba env create -n cellXplore -f cellXplore.yml (local R under conda, no root privilege needed)
 mamba env update -f cellXplore_r_dependencies.yml --name cellXplore
 
 conda activate cellXplore
