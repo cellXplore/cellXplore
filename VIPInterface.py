@@ -1637,21 +1637,38 @@ def showCPDBhatTable(data):
    return cci_table_json
 
 def showCChatTable(data):
-   scD = app.current_app.app_config.dataset_config.get_data_adaptor()
-   if True:
+    scD = app.current_app.app_config.dataset_config.get_data_adaptor()
     cci_table = scD.data.uns['Cellchat_Interactions']
     condition = data['Condition']
     cci_table_subset = cci_table[cci_table['Condition'] == condition]
+
+    if data["selection"] != None:
+        # ppr.pprint(data)
+        cell_types = _get_cell_types_from_points(scD.data, data["selection"])
+        ppr.pprint(cci_table)
+        cci_table_subset = cci_table_subset[cci_table['target'].isin(cell_types)]
+        cci_table_subset = cci_table_subset[cci_table['source'].isin(cell_types)]
+
+    #subset again only the tables
     cci_table_subset = cci_table_subset.to_csv(index=False)
     cci_table_json = json.dumps(cci_table_subset)
+    return cci_table_json
 
-   return cci_table_json
+def _get_cell_types_from_points(adata, points):
+  points_df = pd.DataFrame.from_dict(points)
+  points_df = points_df.round()
+  points_df = points_df.astype('int32')
+  points_df = points_df.rename(columns={0: 'sdimx', 1: 'sdimy'})
+  coordinate_table = adata.uns['spatial']['A1_naive']["coordinates"]
+  spots_of_interest = pd.merge(coordinate_table, points_df.drop_duplicates())
+  deconvolution_table = adata.uns['spatial']['A1_naive']["deconvolution"]
+  decon_of_interest = pd.merge(deconvolution_table, spots_of_interest.drop_duplicates())
+  decon_of_interest = decon_of_interest.drop(columns=['cell_ID', 'sdimx', 'sdimy'])
+  celltypes = set(decon_of_interest.idxmax(axis=1).tolist())
+  return celltypes
 
 def cellChatDotPlot(data):
-
-   scD = app.current_app.app_config.dataset_config.get_data_adaptor()
-   if True:
-    
+    scD = app.current_app.app_config.dataset_config.get_data_adaptor()
     cci_table = scD.data.uns['Cellchat_Interactions']
     cellPval = float(data['cellChatPval'])
     Cluster_R = data['Cluster_Receiver']
@@ -1696,7 +1713,7 @@ def cellChatDotPlot(data):
                                                        pvalues = row['pval'],
                                                        probability = row['prob']))
          bubble_size.append(row['Pseudop'])
-    
+
     small['text'] = hover_text
     small['size'] = bubble_size
     bubble_size = np.array(bubble_size)
@@ -1711,11 +1728,11 @@ def cellChatDotPlot(data):
        marker_size = bubble_size,))
 
     fig.update_traces(mode = 'markers', marker=dict(sizemode='area',
-                                               sizeref = sizeref, 
+                                               sizeref = sizeref,
                                                color=small['prob'],
                                                colorscale=colour,
                                                 sizemin = 1, showscale=True,
-                                               
+
      colorbar_title = 'Communication Probability'))
     fig.update_xaxes(tickangle=45)
 
@@ -1955,42 +1972,14 @@ def singleCellLassoSelection(data):
       return div
   else:
     points = data['selection']
-    #deconvolution_table = scD.data.uns['spatial']['A1_naive']["deconvolution"]
-    #subset_selected_spots = deconvolution_table.loc[[points]]
-    # ppr.pprint("hello")
-    # ppr.pprint(points)
-    # ppr.pprint(type(points))
-    points_df = pd.DataFrame.from_dict(points)
-    points_df = points_df.round()
-    points_df = points_df.astype('int32')
-    points_df = points_df.rename(columns={0:'sdimx', 1:'sdimy'})
-    # ppr.pprint(points_df)
-
-    # deconvolution_table = scD.data.uns['spatial']['A1_naive']["deconvolution"]
-    coordinate_table = scD.data.uns['spatial']['A1_naive']["coordinates"]
-    spots_of_interest = pd.merge(coordinate_table,points_df.drop_duplicates())
-    # ppr.pprint(spots_of_interest)
-
-    deconvolution_table = scD.data.uns['spatial']['A1_naive']["deconvolution"]
-    decon_of_interest = pd.merge(deconvolution_table,spots_of_interest.drop_duplicates())
-    decon_of_interest = decon_of_interest.drop(columns=['cell_ID', 'sdimx', 'sdimy'])
-    ppr.pprint(decon_of_interest)
-
-    # celltypes = decon_of_interest.gt(0.1).dot(decon_of_interest.columns + ','.str[:-1])
-    # celltypes = decon_of_interest.apply(lambda row: row[row > 0.2].index, axis=1)
-    # ppr.pprint(celltypes)
-    ppr.pprint("hello")
-    celltypes = decon_of_interest.idxmax(axis=1)
-    
-    # celltypes = decon_of_interest[decon_of_interest.columns[decon_of_interest.max() > 0.01]]
-
-    ppr.pprint(len(celltypes.index))
-    
-    ppr.pprint(celltypes)
-
+    selected_cell_types = _get_cell_types_from_points(scD.data, points)
     color_palette = list(map(colors.to_hex, cm.tab20.colors))
-    color = scD.data.obs['Cell_Subclusters'].astype('category')
-    umap_table = pd.DataFrame(scD.data.obsm['X_umap'], columns = ['xdim','ydim'])
+
+    subsampled_adata = scD.data[scD.data.obs['Cell_Subclusters'].isin(selected_cell_types)]
+
+    color = subsampled_adata.obs['Cell_Subclusters'].astype('category')
+    umap_table = pd.DataFrame(subsampled_adata.obsm['X_umap'], columns = ['xdim','ydim'])
+
     fig = px.scatter(umap_table, x = 'xdim', y = 'ydim', 
                      color=color, color_discrete_sequence=color_palette,
                      labels={'xdim': " ",

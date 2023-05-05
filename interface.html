@@ -5915,8 +5915,8 @@ if(grpMetaS && grpMetaR && CCI_ConK && CCI_Con && colour) {
     $('#CPDBHeatmapFig').html(res);
 
   },
-  error: function() {
-    console.log('error');
+  error: function(err) {
+    console.log('error: ', err.responseText);
     $("#CCInote2").text('Plotting Error!');
   }
 })
@@ -5954,20 +5954,102 @@ function updateUMAP(dataset){
     url: VIPurl,
     data: stringify(D),
     contentType: 'application/json;charset=UTF-8',
-    dataType: 'json',
+    dataType: 'html',
     success: function(res){
-      $('.singleCellPlotfig').html(res);
+      console.log("updating plot", res);
+      $('#singleCellPlotfig').html(res);
     },
-    error:function(){
-      console.log('error');
+    error:function(request,status,error){
+    console.log('error: ', request,status,error);
       $("#CCInote2").text('Plotting Error!');
     }
   })
   return
 
-  $("#CCInote").text('Input data required');
-  document.getElementById("singleCellPlotfig").innerHTML = "";
 }
+
+function updateTable(dataset){
+
+var CCI_ConK_1Spatial= document.getElementById("CCI_ConditionKey_1Spatial").value;
+var CCI_Con_1Spatial = document.getElementById("CCI_Condition_1Spatial").value;
+
+if(!CCI_ConK_1Spatial || !CCI_Con_1Spatial) {
+  console.error("No conditions selected");
+  return;
+}
+
+var D = {'method': 'cellChatInteractionTable',
+'dataset': window.store.getState().config.displayNames.dataset+'.h5ad',
+'ConditionKey':CCI_ConK_1Spatial,
+'Condition':CCI_Con_1Spatial,
+'selection': dataset.points.map( p => [p.x, p.y])
+};
+
+function stringify(obj) {
+  let cache = [];
+  let str = JSON.stringify(obj, function(key, value) {
+    if (typeof value === "object" && value !== null) {
+      if (cache.indexOf(value) !== -1) {
+      // Circular reference found, discard key
+        return;
+      }
+    // Store value in our collection
+      cache.push(value);
+    }
+    return value;
+  });
+  cache = null; // reset the cache
+  return str;
+}
+
+$.ajax({
+  type: "POST",
+  url: VIPurl,
+  data: stringify(D),
+  contentType: 'application/json;charset=UTF-8',
+  success: function(res){
+    console.log("Building table",res);
+    var resTable = res;
+    resTable = JSON.stringify(resTable);
+    resTable = resTable.split("\\n");
+    resTable = resTable.join('\n');
+    resTable = resTable.replace(/\\/g, '');
+    resTable = resTable.replace(/"/g,"");
+    var gInfo = resTable.split("\n")[0].split(',').slice(7);
+    var tableP = d3.csvParse(resTable, function(data){
+      return [].concat([data.source,
+                (data.target),
+                (data.interaction_name_2),
+                (data.Interacting_Pair),
+                (data.Condition),
+                (+data.pval).toExponential(2),
+                (+data.prob).toFixed(2)],
+                Object.values(data).slice(7));
+      });
+
+    var tableTitle = [];
+    [].concat(["Sender Cluster", "Target Cluster", "Interacting L-R", "Interacting Pair","Condition", "P-value","Communication Probability"]).forEach(function(d){tableTitle = tableTitle.concat({title:d})});
+    console.log(tableTitle);
+    var table = $('#CellChatTableSpatial').DataTable({
+      destroy: true,
+      dom: 'Blfrtrip',
+      lengthMenu:[[10,50,100,200], [10,50,100,200,"All"]],
+      order:[5,"dsc"],
+      buttons:['csv'],
+      data: tableP,
+      columns:tableTitle
+    });
+
+  },
+  error:function(request,status,error){
+  console.log('error: ', request,status,error);
+    $("#CCInote2").text('Plotting Error!');
+  }
+})
+return
+
+}
+
 
 function spatialLassoSelection(){
   
@@ -5984,7 +6066,7 @@ function spatialLassoSelection(){
   contentType: 'application/json;charset=UTF-8',//
   success: function(res){
     $(".spatialLassoPlotbt").prop("disabled",false);
-    console.log('Working')
+    console.log('spatialLassoSelection')
     $('#spatialPlotfig').html(res);
     console.log(res);
 
@@ -5996,12 +6078,13 @@ function spatialLassoSelection(){
     
     console.log(eventData)
     updateUMAP(eventData)
+    updateTable(eventData)
 
   });
 
   },
-  error: function() {
-    console.log('error');
+  error: function(request,status,error) {
+    console.log('error', request,status,error);
     $("#CCInote2").text('Plotting Error!');
   }
 })
@@ -6027,7 +6110,7 @@ function singleCellLassoSelection(){
   contentType: 'application/json;charset=UTF-8',//
   success: function(res){
     $(".singleCellLassoPlotbt").prop("disabled",false);
-    console.log('Working')
+    console.log('singleCellLassoSelection')
     //$('#spatialPlotfig').html(res);
     $('#singleCellPlotfig').html(res);
     console.log(res);
@@ -6043,8 +6126,8 @@ function singleCellLassoSelection(){
   });
 
   },
-  error: function() {
-    console.log('error');
+  error: function(request,status,error) {
+    console.log('error',request,status,error);
     $("#CCInote2").text('Plotting Error!');
   }
 })
