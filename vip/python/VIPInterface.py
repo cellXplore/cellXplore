@@ -40,6 +40,7 @@ import re
 import glob
 import subprocess
 import gc #,psutil
+from server.app import spatialselect
 
 #os.environ['R_HOME'] = '/software/R-4.2.1/lib/R'
 
@@ -49,8 +50,6 @@ import pprint
 ppr = pprint.PrettyPrinter(depth=6)
 
 import server.common.compute.diffexp_generic as diffDefault
-import pickle
-from pyarrow import feather
 
 sys.setrecursionlimit(10000)
 sc.settings.verbosity = 2
@@ -67,6 +66,8 @@ def freeLock(lock):
     lock.release()
 
 def route(data,appConfig):
+  spatialselect.spatialselect()
+
   #ppr.pprint("current working dir:%s"%os.getcwd())
   data = initialization(data,appConfig)
   try:
