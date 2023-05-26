@@ -833,6 +833,13 @@
 
     
     <div id="SPATIALSELECT" class="tabcontent">
+      <div id="spatial_input">
+        <h3>Explore interacting cells within their spatial context</h3>
+        <p>Create a lasso selection around spots of interest to filter cell cell communications between celltypes present in the single cell RNA data:</p>
+        <p>First select your condition of interest:
+          <select id="CCI_ConditionKey_1Spatial" onclick="CellIntList('CCI_ConditionKey_1Spatial', ['CCI_Condition_1Spatial'])"></select>
+          <select id="CCI_Condition_1Spatial"></select></p>
+      </div>
       <div class="column">
         <div id="spatialUMAP">
           <h3>Plot spatial UMAP and make spot selection:</h3>
@@ -841,19 +848,25 @@
         <p id="spatialPlotfig"></p>
 
         <div id="cellChatInteractionTableSpatial">
-          <h3> Table view of interaction:</h3>
-          <p>Select Condition Annotation:
-          <select id="CCI_ConditionKey_1Spatial" onclick="CellIntList('CCI_ConditionKey_1Spatial', ['CCI_Condition_1Spatial'])"></select></p>
-          <p>Select Condition:
-          <select id="CCI_Condition_1Spatial"></select></p>
+          <h3> Table view of selected interactions:</h3>
           <button class="cellChatTablebtSpatial" onclick="cellChatInteractionTable('SPATIALSELECT')"><b>Show Table</b></button>
           <table id="CellChatTableSpatial" class="display"></table>
         </div>
+        <div id="circosPlotInteractions">
+          <h3>Plot filtered interactions:</h3>
+          <p>Select plot type:
+          <select id="plotType">
+            <option value='Heatmap'>Heatmap</option>
+            <option value='DotPlot'>Dot Plot</option>
+            <option value='Circos'>Circos Plot</option>
+          </select></p>
+          <button class="circosPlotbt" onclick="circosPlot()"><b>Plot</b></button>
+        </div>
+        <p id="circosPlotfig"></p>
       </div>
       <div class="column2">
         <div id="singlecellUMAP">
-          <h3>Plot single cell UMAP and make cell type selection:</h3>
-          <button class="singleCellLassoPlotbt" onclick="singleCellLassoSelection()"><b>Plot and Select</b></button>
+          <h3>Cell types present in single cell UMAP:</h3>
         </div>
         <p id="singleCellPlotfig"></p>
     </div>
@@ -6137,6 +6150,37 @@ return
   document.getElementById("singleCellPlotfig").innerHTML = "";
   
 } 
+
+function circosPlot(){
+  var D = {'method':'circosPlot',
+  'dataset': window.store.getState().config.displayNames.dataset+'.h5ad',
+  'figOpt':window.figOpt
+};
+
+  $(".circosPlotbt").prop("disabled", true);
+
+  console.log(D);
+  $.ajax({
+  type:"POST",
+  url: VIPurl,
+  data:JSON.stringify(D),
+  contentType: 'application/json;charset=UTF-8',//
+  success: function(res){
+    $(".circosPlotbt").prop("disabled",false);
+    console.log('circosPlot')
+    showImg('circosPlotfig',res);
+
+},
+  error: function(request,status,error) {
+    console.log('error',request,status,error);
+    $("#CCInote2").text('Plotting Error!');
+  }
+})
+  return
+
+  $("#CCInote").text('Input data required');
+  document.getElementById("circosPlotfig").innerHTML = "";
+}
 
 function metaSel(){
   document.getElementById("metaCellBTspin").style.visibility="visible";

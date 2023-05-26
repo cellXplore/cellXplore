@@ -23,6 +23,7 @@ from matplotlib import cm, colors
 import seaborn as sns
 import matplotlib.patches as mpatches
 from matplotlib import rcParams
+import random
 from matplotlib.widgets import LassoSelector
 from matplotlib.path import Path
 import plotly.graph_objects as go
@@ -31,6 +32,9 @@ import plotly.io as plotIO
 import plotly.express as px
 from ipywidgets import interactive, VBox
 import base64
+import rpy2.robjects as ro
+from rpy2.robjects.packages import importr
+from rpy2.robjects import pandas2ri
 import math
 from io import BytesIO
 import sys
@@ -41,7 +45,6 @@ import glob
 import subprocess
 import gc #,psutil
 
-#os.environ['R_HOME'] = '/software/R-4.2.1/lib/R'
 
 strExePath = os.path.dirname(os.path.abspath(__file__))
 
@@ -370,7 +373,8 @@ def distributeTask(aTask):
     'cellChatDotPlot':cellChatDotPlot,
     'CPDBDotPlot':CPDBDotPlot,
     'spatialLassoSelection':spatialLassoSelection,
-    'singleCellLassoSelection':singleCellLassoSelection
+    'singleCellLassoSelection':singleCellLassoSelection,
+    'circosPlot':circosPlot
   }.get(aTask,errorTask)
 
 def HELLO(data):
@@ -1645,7 +1649,7 @@ def showCChatTable(data):
     if data["selection"] != None:
         # ppr.pprint(data)
         cell_types = _get_cell_types_from_points(scD.data, data["selection"])
-        ppr.pprint(cci_table)
+        # ppr.pprint(cci_table)
         cci_table_subset = cci_table_subset[cci_table['target'].isin(cell_types)]
         cci_table_subset = cci_table_subset[cci_table['source'].isin(cell_types)]
 
@@ -1924,7 +1928,7 @@ def CPDBHeatmap(data):
 def spatialLassoSelection(data):
   scD = app.current_app.app_config.dataset_config.get_data_adaptor()
   if True:
-    color_palette = list(map(colors.to_hex, cm.tab20.colors))
+    color_palette = list(map(colors.to_hex, cm.Dark2.colors))
     color = scD.data.uns['spatial']['A1_naive']["metadata"]['brain_regions'].astype('category')
     spatial_table = scD.data.uns['spatial']['A1_naive']["coordinates"]
     fig = px.scatter(spatial_table, x = 'sdimx', y = 'sdimy', 
@@ -1979,9 +1983,12 @@ def singleCellLassoSelection(data):
 
     color = subsampled_adata.obs['Cell_Subclusters'].astype('category')
     umap_table = pd.DataFrame(subsampled_adata.obsm['X_umap'], columns = ['xdim','ydim'])
-
+    color_dict = {'T cells': '#1f77b4', 'Astrocyte 1': '#aec7e8', 'Astrocyte 2': '#ff7f0e',
+                  'B cells/ Oligo': '#ffbb78', 'Endothelial': '#2ca02c','Ependymocytes': '#98df8a',
+                  'Microglia 1': '#d62728', 'Microglia 2': '#ff9896', 'Microglia 3': '#9467bd', 
+                  'Microglia 4': '#c5b0d5', 'Pericytes/ Tanycytes': '#e377c2'}
     fig = px.scatter(umap_table, x = 'xdim', y = 'ydim', 
-                     color=color, color_discrete_sequence=color_palette,
+                     color=color, color_discrete_map=color_dict,
                      labels={'xdim': " ",
                              'ydim': " "
                      })
@@ -1992,6 +1999,33 @@ def singleCellLassoSelection(data):
     div = plotIO.to_html(fig)
       
     return div
+  
+def circosPlot(circos_table):
+        
+        ppr.pprint(circos_table)
+        ppr.pprint("working")
+        ppr.pprint(ro.r)
+        # ro.r['source']('/home/olympia/mambaforge-pypy3/envs/cellXplore/lib/python3.8/site-packages/server/app/circos_plot.R')
+        ppr.pprint("broken")
+        
+        ppr.pprint("working up until R")
+        ppr.pprint(circos_table)
+        circos_table_r = pandas2ri.py2ri(circos_table)
+        ppr.pprint(circos_table_r)
+        ro.globalenv['net'] = circos_table_r
+
+        res = ro.r('''
+        circos = netVisual_chord_gene_order_top_label_plot(net)
+        temp_id <- paste(s_id, ".png", sep="")
+        ggsave(temp_id, circos)
+        fig = base64enc::dataURI(file = temp_id, mime = "image/png")
+        fig = gsub("data:image/png;base64,","",fig)
+        file.remove(temp_id)
+        fig
+        ''')
+        img = res[0]
+
+        return img
 
 
 def cellIntDifferentialHeatmap(data):
