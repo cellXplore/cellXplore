@@ -846,23 +846,14 @@
           <button class="spatialLassoPlotbt" onclick="spatialLassoSelection()"><b>Plot and Select</b></button>
         </div>
         <p id="spatialPlotfig"></p>
-
-        <div id="cellChatInteractionTableSpatial">
-          <h3> Table view of selected interactions:</h3>
-          <button class="cellChatTablebtSpatial" onclick="cellChatInteractionTable('SPATIALSELECT')"><b>Show Table</b></button>
-          <table id="CellChatTableSpatial" class="display"></table>
-        </div>
         <div id="circosPlotInteractions">
-          <h3>Plot filtered interactions:</h3>
-          <p>Select plot type:
-          <select id="plotType">
-            <option value='Heatmap'>Heatmap</option>
-            <option value='DotPlot'>Dot Plot</option>
-            <option value='Circos'>Circos Plot</option>
-          </select></p>
-          <button class="circosPlotbt" onclick="circosPlot()"><b>Plot</b></button>
+          <h3>Circos plot view of filtered interactions:</h3>
         </div>
         <p id="circosPlotfig"></p>
+        <div id="cellChatInteractionTableSpatial">
+          <h3> Table view of selected interactions:</h3>
+          <table id="CellChatTableSpatial" class="display"></table>
+        </div>
       </div>
       <div class="column2">
         <div id="singlecellUMAP">
@@ -2055,7 +2046,7 @@ function showImg(eID,data){
   if (['SGVfig','HEATfig'].includes(eID)) {
     document.getElementById(eID).innerHTML = '<img id="'+eID.replace('fig','img')+'" src="data:image/'+window.figOpt['img'].replace('svg','svg+xml')+';base64,'+data+'" width="100%" height="100%"/>';
   } else {
-    document.getElementById(eID).innerHTML = '<img id="'+eID.replace('fig','img')+'" src="data:image/'+window.figOpt['img'].replace('svg','svg+xml')+';base64,'+data+'" width="100%" height="auto"/>';
+    document.getElementById(eID).innerHTML = '<img id="'+eID.replace('fig','img')+'" src="data:image/'+window.figOpt_svg['img'].replace('svg','svg+xml')+';base64,'+data+'" width="100%" height="auto"/>';
   }
 }
 function saveImg(pngID){
@@ -2327,7 +2318,8 @@ function init(){
     window.biogen=[];
     window.bioGeneGrp={};
     window.accumulateCell={celllist1:[],celllist2:[],cellaccumu:false};
-    window.figOpt={scale:'No',scaleZero:'No',clipValue:'Yes',scaleMax:20,dpi:150,img:'png',fontsize:11,vectorFriendly:'Yes',transparent:'No',scanpybranch:'split_show',colorMap:'viridis_r'};
+    window.figOpt={scale:'No',scaleZero:'No',clipValue:'Yes',scaleMax:20,dpi:600,img:'png',fontsize:11,vectorFriendly:'Yes',transparent:'No',scanpybranch:'split_show',colorMap:'viridis_r'};
+    window.figOpt_svg={scale:'Yes',scaleZero:'No',clipValue:'Yes',scaleMax:20,dpi:600,img:'svg',fontsize:14,vectorFriendly:'Yes',transparent:'No',scanpybranch:'split_show',colorMap:'viridis_r'};
     //if (grpL[">Description"] !== undefined && grpL[">Description"].categories[0].split(";").length>1 && !grpL[">Description"].categories[0].split(";")[1].includes("scale")) {
     //  window.figOpt['scale'] = "Yes";
     //}
@@ -5981,6 +5973,59 @@ function updateUMAP(dataset){
 
 }
 
+function updateCircos(dataset){
+  
+  var CCI_ConK_1Spatial= document.getElementById("CCI_ConditionKey_1Spatial").value;
+  var CCI_Con_1Spatial = document.getElementById("CCI_Condition_1Spatial").value;
+  
+  if(!CCI_ConK_1Spatial || !CCI_Con_1Spatial) {
+    console.error("No conditions selected");
+  return;
+  }
+  
+  var D = {'method': 'circosPlot',
+  'dataset': window.store.getState().config.displayNames.dataset+'.h5ad',
+  'ConditionKey':CCI_ConK_1Spatial,
+  'Condition':CCI_Con_1Spatial,
+  'selection': dataset.points.map( p => [p.x, p.y]),
+  'figOpt':window.figOpt};
+
+  function stringify(obj) {
+    let cache = [];
+    let str = JSON.stringify(obj, function(key, value) {
+      if (typeof value === "object" && value !== null) {
+        if (cache.indexOf(value) !== -1) {
+        // Circular reference found, discard key
+          return;
+        }
+      // Store value in our collection
+        cache.push(value);
+      }
+      return value;
+    });
+    cache = null; // reset the cache
+    return str;
+  }
+
+  $.ajax({
+    type: "POST",
+    url: VIPurl,
+    data: stringify(D),
+    contentType: 'application/json;charset=UTF-8',
+    dataType: 'html',
+    success: function(res){
+      console.log("updating plot", res);
+      showImg('circosPlotfig',res);
+    },
+    error:function(request,status,error){
+    console.log('error: ', request,status,error);
+      $("#CCInote2").text('Plotting Error!');
+    }
+  })
+  return
+
+}
+
 function updateTable(dataset){
 
 var CCI_ConK_1Spatial= document.getElementById("CCI_ConditionKey_1Spatial").value;
@@ -6064,6 +6109,8 @@ return
 }
 
 
+
+
 function spatialLassoSelection(){
   
   var D = {'method':'spatialLassoSelection',
@@ -6092,6 +6139,7 @@ function spatialLassoSelection(){
     console.log(eventData)
     updateUMAP(eventData)
     updateTable(eventData)
+    updateCircos(eventData)
 
   });
 
@@ -6154,7 +6202,8 @@ return
 function circosPlot(){
   var D = {'method':'circosPlot',
   'dataset': window.store.getState().config.displayNames.dataset+'.h5ad',
-  'figOpt':window.figOpt
+  'selection': dataset.points.map( p => [p.x, p.y]),
+  'figOpt':window.figOpt_svg
 };
 
   $(".circosPlotbt").prop("disabled", true);
@@ -6167,7 +6216,7 @@ function circosPlot(){
   contentType: 'application/json;charset=UTF-8',//
   success: function(res){
     $(".circosPlotbt").prop("disabled",false);
-    console.log('circosPlot')
+    console.log('circos plot')
     showImg('circosPlotfig',res);
 
 },

@@ -35,6 +35,7 @@ import base64
 import rpy2.robjects as ro
 from rpy2.robjects.packages import importr
 from rpy2.robjects import pandas2ri
+from rpy2.robjects.conversion import localconverter
 import math
 from io import BytesIO
 import sys
@@ -2000,30 +2001,57 @@ def singleCellLassoSelection(data):
       
     return div
   
-def circosPlot(circos_table):
-        
-        ppr.pprint(circos_table)
-        ppr.pprint("working")
-        ppr.pprint(ro.r)
-        # ro.r['source']('/home/olympia/mambaforge-pypy3/envs/cellXplore/lib/python3.8/site-packages/server/app/circos_plot.R')
-        ppr.pprint("broken")
-        
-        ppr.pprint("working up until R")
-        ppr.pprint(circos_table)
-        circos_table_r = pandas2ri.py2ri(circos_table)
-        ppr.pprint(circos_table_r)
-        ro.globalenv['net'] = circos_table_r
+def circosPlot(data):
+        scD = app.current_app.app_config.dataset_config.get_data_adaptor()
+        cci_table = scD.data.uns['Cellchat_Interactions']
+        condition = data['Condition']
+        cci_table_subset = cci_table[cci_table['Condition'] == condition]
 
-        res = ro.r('''
-        circos = netVisual_chord_gene_order_top_label_plot(net)
-        temp_id <- paste(s_id, ".png", sep="")
-        ggsave(temp_id, circos)
-        fig = base64enc::dataURI(file = temp_id, mime = "image/png")
-        fig = gsub("data:image/png;base64,","",fig)
-        file.remove(temp_id)
-        fig
-        ''')
-        img = res[0]
+        if data["selection"] != None:
+        # ppr.pprint(data)
+          cell_types = _get_cell_types_from_points(scD.data, data["selection"])
+        # ppr.pprint(cci_table)
+          cci_table_subset = cci_table_subset[cci_table['target'].isin(cell_types)]
+          cci_table_subset = cci_table_subset[cci_table['source'].isin(cell_types)]
+
+        
+
+          # ppr.pprint("working")
+          # ppr.pprint(ro.r)
+          # ppr.pprint(cci_table_subset)
+    
+          ro.r['source']('/home/olympia/mambaforge-pypy3/envs/cellXplore/lib/python3.8/site-packages/server/app/circos_plot.R')
+          ppr.pprint("R SCRIPT SOURCED")
+          
+          with localconverter(ro.default_converter + pandas2ri.converter):
+            circos_table_r = ro.conversion.py2rpy(cci_table_subset)
+            ppr.pprint(circos_table_r)
+            ro.globalenv['net'] = circos_table_r
+            valList = []
+            for i in range(10):
+              value = random.randint(0,10)
+              valList.append(value)
+
+            session_id = ''.join([str(n) for n in valList])
+            ro.globalenv['s_id'] = session_id
+            ro.globalenv["strPath"] = strExePath
+            ppr.pprint(session_id)
+            ppr.pprint(ro.globalenv["strPath"])
+            res = ro.r('''
+            tempID = paste(s_id,".svg",sep="")
+            svg(file = tempID)
+            netVisual_chord_gene_order_top_label_plot(net)
+            dev.off()
+            fig = base64enc::dataURI(file = tempID, mime = "image/svg")
+            fig = gsub("data:image/svg;base64,","",fig)
+            file.remove(tempID)
+            fig
+            ''')
+            ppr.pprint('run okay')
+            
+            img = res[0]
+
+            ppr.pprint(img)
 
         return img
 
