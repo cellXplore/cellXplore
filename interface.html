@@ -541,6 +541,12 @@
         padding:10px;
       }
 
+      .row:after {
+        content:"";
+        display: table;
+        clear:both;
+      }
+
 
     </style>
   </head>
@@ -840,12 +846,26 @@
           <select id="CCI_ConditionKey_1Spatial" onclick="CellIntList('CCI_ConditionKey_1Spatial', ['CCI_Condition_1Spatial'])"></select>
           <select id="CCI_Condition_1Spatial"></select></p>
       </div>
+      <div class="row">
       <div class="column">
         <div id="spatialUMAP">
           <h3>Plot spatial UMAP and make spot selection:</h3>
+          <p> Select tissue slide:
+            <select id="slide">
+              <option value = "A1_naive">A1_naive</option>
+              <option value = "45dpi">45dpi</option>
+              </select></p>
           <button class="spatialLassoPlotbt" onclick="spatialLassoSelection()"><b>Plot and Select</b></button>
         </div>
         <p id="spatialPlotfig"></p>
+        </div>
+        <div class="column">
+          <div id="singlecellUMAP">
+            <h3>Cell types present in single cell UMAP:</h3>
+          </div>
+          <p id="singleCellPlotfig"></p>
+      </div>
+    </div>
         <div id="circosPlotInteractions">
           <h3>Circos plot view of filtered interactions:</h3>
         </div>
@@ -854,13 +874,7 @@
           <h3> Table view of selected interactions:</h3>
           <table id="CellChatTableSpatial" class="display"></table>
         </div>
-      </div>
-      <div class="column2">
-        <div id="singlecellUMAP">
-          <h3>Cell types present in single cell UMAP:</h3>
-        </div>
-        <p id="singleCellPlotfig"></p>
-    </div>
+
     </div><!--SPATIALSELECT-->
 
     <div id="GD" class="tabcontent">
@@ -2344,6 +2358,7 @@ function init(){
     var CCI_Con_1 = document.getElementById("CCI_Condition_1");
     var CCI_ConK_1Spatial = document.getElementById("CCI_ConditionKey_1Spatial");
     var CCI_Con_1Spatial = document.getElementById("CCI_Condition_1Spatial");
+    //var slide = document.getElementById("slide");
 
     for(const one of grps){
       if (one.startsWith(">")) continue;
@@ -2365,6 +2380,7 @@ function init(){
       CCI_Con_1.add(createOpt(one));
       CCI_ConK_1Spatial.add(createOpt(one));
       CCI_Con_1Spatial.add(createOpt(one));
+      //slide.add(createOpt(one));
     }
     densS.add(createOpt('None'));
     densG.add(createOpt('None'));
@@ -5825,7 +5841,7 @@ function CPDBInteractionTable(){
 	      'dataset': window.store.getState().config.displayNames.dataset+'.h5ad',
         'ConditionKey':CCI_ConK,
         'Condition':CCI_Con};
-    $(".CPDBTablebt").prop("disabled", true);
+    $(".CPDBTablebt").prop("disabled", false);
     $('#CPDBTable').empty();
 
     $.ajax({
@@ -5896,7 +5912,7 @@ var grpMetaR = getRecCPDB();
 
 var colour = document.getElementById('CPDBHeatmapColour').value;
 
-$(".CPDBHeatmapbt").prop("disabled", true);
+$(".CPDBHeatmapbt").prop("disabled", false);
 
 if(grpMetaS && grpMetaR && CCI_ConK && CCI_Con && colour) {
   
@@ -5915,7 +5931,7 @@ if(grpMetaS && grpMetaR && CCI_ConK && CCI_Con && colour) {
   data:JSON.stringify(D),
   contentType: 'application/json;charset=UTF-8',//
   success: function(res){
-    $(".CPDBHeatmapbt").prop("disabled",true);
+    $(".CPDBHeatmapbt").prop("disabled",false);
  
     $('#CPDBHeatmapFig').html(res);
 
@@ -5932,9 +5948,13 @@ return
 }
 
 function updateUMAP(dataset){
+  var slide = document.getElementById('slide').value;
+
+  if (slide) {
   var D = {'method': 'singleCellLassoSelection',
   'dataset': window.store.getState().config.displayNames.dataset+'.h5ad',
   'selection': dataset.points.map( p => [p.x, p.y]),
+  'slide':slide,
   'figOpt':window.figOpt};
 
   function stringify(obj) {
@@ -5970,23 +5990,26 @@ function updateUMAP(dataset){
     }
   })
   return
-
+}
 }
 
 function updateCircos(dataset){
   
   var CCI_ConK_1Spatial= document.getElementById("CCI_ConditionKey_1Spatial").value;
   var CCI_Con_1Spatial = document.getElementById("CCI_Condition_1Spatial").value;
-  
+  var slide = document.getElementById('slide').value;
+
   if(!CCI_ConK_1Spatial || !CCI_Con_1Spatial) {
     console.error("No conditions selected");
   return;
   }
   
+  if (slide) {
   var D = {'method': 'circosPlot',
   'dataset': window.store.getState().config.displayNames.dataset+'.h5ad',
   'ConditionKey':CCI_ConK_1Spatial,
   'Condition':CCI_Con_1Spatial,
+  'slide':slide,
   'selection': dataset.points.map( p => [p.x, p.y]),
   'figOpt':window.figOpt};
 
@@ -6023,23 +6046,26 @@ function updateCircos(dataset){
     }
   })
   return
-
+}
 }
 
 function updateTable(dataset){
 
 var CCI_ConK_1Spatial= document.getElementById("CCI_ConditionKey_1Spatial").value;
 var CCI_Con_1Spatial = document.getElementById("CCI_Condition_1Spatial").value;
+var slide = document.getElementById('slide').value;
 
 if(!CCI_ConK_1Spatial || !CCI_Con_1Spatial) {
   console.error("No conditions selected");
   return;
 }
 
+if (slide) {
 var D = {'method': 'cellChatInteractionTable',
 'dataset': window.store.getState().config.displayNames.dataset+'.h5ad',
 'ConditionKey':CCI_ConK_1Spatial,
 'Condition':CCI_Con_1Spatial,
+'slide':slide,
 'selection': dataset.points.map( p => [p.x, p.y])
 };
 
@@ -6105,7 +6131,7 @@ $.ajax({
   }
 })
 return
-
+}
 }
 
 
@@ -6113,8 +6139,13 @@ return
 
 function spatialLassoSelection(){
   
+  var slide = document.getElementById('slide').value;
+
+  if (slide) {
+
   var D = {'method':'spatialLassoSelection',
   'dataset': window.store.getState().config.displayNames.dataset+'.h5ad',
+  'slide': slide,
   'figOpt':window.figOpt};
   $(".spatialLassoPlotbt").prop("disabled", true);
   
@@ -6150,7 +6181,7 @@ function spatialLassoSelection(){
   }
 })
 return
-
+}
   $("#CCInote").text('Input data required');
   document.getElementById("spatialPlotfig").innerHTML = "";
   

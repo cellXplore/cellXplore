@@ -1591,7 +1591,6 @@ def plotBW(data):
 
     return img
 
-
 def cellChatHeatmap(data):
   scD = app.current_app.app_config.dataset_config.get_data_adaptor()
   if True:
@@ -1649,7 +1648,7 @@ def showCChatTable(data):
 
     if data["selection"] != None:
         # ppr.pprint(data)
-        cell_types = _get_cell_types_from_points(scD.data, data["selection"])
+        cell_types = _get_cell_types_from_points(scD.data, data["selection"], data["slide"])
         # ppr.pprint(cci_table)
         cci_table_subset = cci_table_subset[cci_table['target'].isin(cell_types)]
         cci_table_subset = cci_table_subset[cci_table['source'].isin(cell_types)]
@@ -1659,14 +1658,15 @@ def showCChatTable(data):
     cci_table_json = json.dumps(cci_table_subset)
     return cci_table_json
 
-def _get_cell_types_from_points(adata, points):
+def _get_cell_types_from_points(adata, points, slide):
+  ppr.pprint(slide)
   points_df = pd.DataFrame.from_dict(points)
   points_df = points_df.round()
   points_df = points_df.astype('int32')
   points_df = points_df.rename(columns={0: 'sdimx', 1: 'sdimy'})
-  coordinate_table = adata.uns['spatial']['A1_naive']["coordinates"]
+  coordinate_table = adata.uns['spatial'][slide]["coordinates"]
   spots_of_interest = pd.merge(coordinate_table, points_df.drop_duplicates())
-  deconvolution_table = adata.uns['spatial']['A1_naive']["deconvolution"]
+  deconvolution_table = adata.uns['spatial'][slide]["deconvolution"]
   decon_of_interest = pd.merge(deconvolution_table, spots_of_interest.drop_duplicates())
   decon_of_interest = decon_of_interest.drop(columns=['cell_ID', 'sdimx', 'sdimy'])
   celltypes = set(decon_of_interest.idxmax(axis=1).tolist())
@@ -1876,10 +1876,9 @@ def CPDBHeatmap(data):
     fig.update_layout(
        title = 'Number of Cell-Cell Interactions', title_x = 0.5,
        xaxis = dict(
-       title = 'Interacting Cell Types',),
+       title = 'Receiving Cell Types',),
        yaxis = dict(
-       title = 'Ligand-Receptor Pairs'),
-       height = 800)
+       title = 'Sending Cell Types'))
 
     div = plotIO.to_html(fig)
 
@@ -1929,9 +1928,10 @@ def CPDBHeatmap(data):
 def spatialLassoSelection(data):
   scD = app.current_app.app_config.dataset_config.get_data_adaptor()
   if True:
+    slide = data["slide"]
     color_palette = list(map(colors.to_hex, cm.Dark2.colors))
-    color = scD.data.uns['spatial']['A1_naive']["metadata"]['brain_regions'].astype('category')
-    spatial_table = scD.data.uns['spatial']['A1_naive']["coordinates"]
+    color = scD.data.uns['spatial'][slide]["metadata"]['brain_regions'].astype('category')
+    spatial_table = scD.data.uns['spatial'][slide]["coordinates"]
     fig = px.scatter(spatial_table, x = 'sdimx', y = 'sdimy', 
                      color=color, color_discrete_sequence=color_palette,
                      labels={'sdimx': " ",
@@ -1977,7 +1977,8 @@ def singleCellLassoSelection(data):
       return div
   else:
     points = data['selection']
-    selected_cell_types = _get_cell_types_from_points(scD.data, points)
+    slide = data['slide']
+    selected_cell_types = _get_cell_types_from_points(scD.data, points, slide)
     color_palette = list(map(colors.to_hex, cm.tab20.colors))
 
     subsampled_adata = scD.data[scD.data.obs['Cell_Subclusters'].isin(selected_cell_types)]
@@ -2009,7 +2010,7 @@ def circosPlot(data):
 
         if data["selection"] != None:
         # ppr.pprint(data)
-          cell_types = _get_cell_types_from_points(scD.data, data["selection"])
+          cell_types = _get_cell_types_from_points(scD.data, data["selection"], data["slide"])
         # ppr.pprint(cci_table)
           cci_table_subset = cci_table_subset[cci_table['target'].isin(cell_types)]
           cci_table_subset = cci_table_subset[cci_table['source'].isin(cell_types)]
