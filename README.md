@@ -33,23 +33,23 @@ source activate cellXplore
 ./config.sh
 For Mac User, ./config.macOS.sh
 ```
+
 ## 4. Run `cellXplore` by specifiying a `.h5ad` file storing scRNA-seq data along with a host and a port, use "ps" to find used ports to spare, see https://chanzuckerberg.github.io/cellxgene/posts/launch for details.
-```bash
+``` bash
 ps -ef | grep cellxgene
 Rscript -e 'reticulate::py_config()'
 # Run the following command if the output of the above command doesn't point to the `Python` in your env.
 export RETICULATE_PYTHON=`which python`
 cellxgene launch --host <xxx> --port <xxx> --disable-annotations --verbose <h5ad file>
 ```
+
 ## 5. From a web browser (••Chrome is preferred••, Version 87.0.4280.88 or 87.0.4280.141 is used), access http(s)://host:port
+
 
 You should be able to see this in Console of Chrome Developer Tools (Mac: Option+⌘+J, Windows/Linux: Shift+Ctrl+J) if everything is right.
 ![VIP_ready](https://user-images.githubusercontent.com/29576524/92059839-46482d00-ed60-11ea-8890-8e1b513a1656.png)
 
 *Note: While spinning up the `cellXplore` from a HPC, do **NOT** use qlogin. **ssh directly to the server**.*
 
-
-
 # Future Development
-
-Currently we are working towards developing `cellXplore` to handle integrated scRNA-seq data with spatial data to build a comprehensive view of the interactome in its native context. 
+Currently we are working towards developing `cellXplore` to handle integrated scRNA-seq data with high-plex spatial data such as 10X Xenium and Cosmx to build a comprehensive view of the interactome in its native context. In addition to this the development of cellXplore to be applicable to low-plex spatial technologies is underway such as imaging mass cytometry and merFISH.
