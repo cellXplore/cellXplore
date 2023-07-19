@@ -14,5 +14,5 @@ cd cellxgene/client; make build
 cp build/index.html $strPath/server/common/web/templates/
 rm $strPath/server/common/web/static/main-*.*
 rm $strPath/server/common/web/static/obsolete-*.*
-cp build/static/*   $strPath/server/common/web/static/
+cp -r build/static/*   $strPath/server/common/web/static/
 cd ../..
